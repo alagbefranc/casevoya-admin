@@ -35,6 +35,13 @@ Sample mode `/sample-mode` · Migration `/migration/jobs` · plus `/session*` ev
 Read-only stubs (no data source yet, response carries `stub: true` and a `gap` sentence):
 `GET /releases/app-notes`, `GET /privacy/breaches`, and `featureFlags` inside `GET /config`.
 
+Settings: `GET /config` marks each setting `editable` with `allowed_units`. Only `{unit, count}` settings
+are editable (`trial.duration`, `licence.recheck_interval`, `licence.manual_check_target`,
+`source.recheck_interval.*`); `PATCH /config/settings/:key` takes `{ value: { unit, count }, reason }`
+and returns `409 conflict` for any other key, `422` on `value.unit` for the wrong unit.
+
+The full page-by-page frontend contract is `docs/FRONTEND-SPEC.md`.
+
 ## Tests
 
 `tests/api-endpoints.test.ts` runs authz denial, validation and the happy path for every endpoint in the

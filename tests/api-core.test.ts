@@ -267,9 +267,25 @@ describe("designer pages", () => {
   });
   it("404s an unknown setting without calling the database function", async () => {
     const d = deps({ session: "fresh" });
-    const res = await handle(req("PATCH", "/config/settings/nope.key", { value: { enabled: true }, reason: "Try it" }), ENDPOINTS, d);
+    const res = await handle(req("PATCH", "/config/settings/nope.key", { value: { unit: "days", count: 3 }, reason: "Try it" }), ENDPOINTS, d);
     expect(res.status).toBe(404);
     expect(d.userDb.calls).toEqual([]);
+  });
+  it("refuses settings the database cannot write, and wrong units, before calling it", async () => {
+    const d = deps({ session: "fresh", db: fakeDb({}, { product_settings: [{ key: "documents.large_uploads_enabled", value: { enabled: false } }] }) });
+    const res = await handle(req("PATCH", "/config/settings/documents.large_uploads_enabled", { value: { unit: "days", count: 3 }, reason: "Try it" }), ENDPOINTS, d);
+    expect(res.status).toBe(409);
+    const d2 = deps({ session: "fresh", db: fakeDb({}, { product_settings: [{ key: "licence.manual_check_target", value: { unit: "business_days", count: 1 } }] }) });
+    const res2 = await handle(req("PATCH", "/config/settings/licence.manual_check_target", { value: { unit: "days", count: 3 }, reason: "Try it" }), ENDPOINTS, d2);
+    expect(res2.status).toBe(422);
+    expect(((await body(res2)).error as { details: { issues: { path: string }[] } }).details.issues[0].path).toBe("value.unit");
+    expect(d.userDb.calls).toEqual([]);
+    expect(d2.userDb.calls).toEqual([]);
+  });
+  it("marks only {unit, count} settings editable", async () => {
+    const d = deps({ db: fakeDb({}, { product_settings: [{ key: "a.enabled", value: { enabled: true } }, { key: "trial.duration", value: { unit: "days", count: 14 } }] }) });
+    const out = (await body(await handle(req("GET", "/config"), ENDPOINTS, d))).data as { settings: { key: string; editable: boolean; allowed_units: string[] }[] };
+    expect(out.settings.map((s) => [s.key, s.editable, s.allowed_units])).toEqual([["a.enabled", false, []], ["trial.duration", true, ["days", "months"]]]);
   });
   it("computes incident duration", () => {
     expect(durationMinutes({ starts_at: "2026-10-29T10:00:00Z", published_at: null, resolved_at: "2026-10-29T11:30:00Z" })).toBe(90);
