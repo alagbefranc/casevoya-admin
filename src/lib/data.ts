@@ -217,3 +217,179 @@ export async function listSupportRequests(admin: AdminContext): Promise<SupportR
     uses: useCount.get(r.id as string) ?? 0,
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Shared templates (ADM-03). Reads only; every write is an audited RPC.
+// ---------------------------------------------------------------------------
+
+export type TemplateBody = { title: string; summary: string; items: string[] };
+
+export type TemplateVersionRow = {
+  id: string;
+  templateId: string;
+  stableKey: string;
+  templateTitle: string;
+  versionNumber: number;
+  status: string;
+  body: TemplateBody;
+  contentHash: string;
+  authorName: string;
+  authorUserId: string | null;
+  testEvidence: string;
+  effectiveOn: string;
+  changelog: string;
+  supersedesVersionId: string | null;
+  reviewerLabel: string | null;
+  reviewedAt: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+};
+
+const VERSION_COLUMNS =
+  "id, template_id, version_number, status, body, content_hash, author_name, author_user_id, test_evidence, effective_on, changelog, supersedes_version_id, reviewer_label, reviewed_at, published_at, created_at";
+
+function asBody(value: unknown): TemplateBody {
+  const v = (value ?? {}) as Record<string, unknown>;
+  return {
+    title: typeof v.title === "string" ? v.title : "",
+    summary: typeof v.summary === "string" ? v.summary : "",
+    items: Array.isArray(v.items) ? v.items.filter((i): i is string => typeof i === "string") : [],
+  };
+}
+
+function toVersion(row: Record<string, unknown>, templates: Map<string, { key: string; title: string }>): TemplateVersionRow {
+  const t = templates.get(row.template_id as string);
+  return {
+    id: row.id as string,
+    templateId: row.template_id as string,
+    stableKey: t?.key ?? "?",
+    templateTitle: t?.title ?? "?",
+    versionNumber: row.version_number as number,
+    status: row.status as string,
+    body: asBody(row.body),
+    contentHash: row.content_hash as string,
+    authorName: row.author_name as string,
+    authorUserId: (row.author_user_id as string | null) ?? null,
+    testEvidence: row.test_evidence as string,
+    effectiveOn: row.effective_on as string,
+    changelog: row.changelog as string,
+    supersedesVersionId: (row.supersedes_version_id as string | null) ?? null,
+    reviewerLabel: (row.reviewer_label as string | null) ?? null,
+    reviewedAt: (row.reviewed_at as string | null) ?? null,
+    publishedAt: (row.published_at as string | null) ?? null,
+    createdAt: row.created_at as string,
+  };
+}
+
+async function templateIndex(admin: AdminContext): Promise<Map<string, { key: string; title: string }>> {
+  const { data, error } = await admin.db.from("shared_templates").select("id, stable_key, title").limit(2000);
+  if (error) fail("shared_templates", error);
+  return new Map((data ?? []).map((row) => [row.id as string, { key: row.stable_key as string, title: row.title as string }]));
+}
+
+/** Drafts waiting for review, the published versions, and recent decisions. */
+export async function templateOverview(admin: AdminContext): Promise<{
+  drafts: TemplateVersionRow[];
+  published: TemplateVersionRow[];
+  recent: TemplateVersionRow[];
+  templateCount: number;
+}> {
+  const templates = await templateIndex(admin);
+  const [drafts, published, recent] = await Promise.all([
+    admin.db.from("shared_template_versions").select(VERSION_COLUMNS).eq("status", "draft").order("created_at", { ascending: true }).limit(200),
+    admin.db.from("shared_template_versions").select(VERSION_COLUMNS).eq("status", "published").order("published_at", { ascending: false }).limit(500),
+    admin.db
+      .from("shared_template_versions")
+      .select(VERSION_COLUMNS)
+      .in("status", ["rejected", "superseded", "rolled_back"])
+      .order("updated_at", { ascending: false })
+      .limit(30),
+  ]);
+  if (drafts.error) fail("shared_template_versions (drafts)", drafts.error);
+  if (published.error) fail("shared_template_versions (published)", published.error);
+  if (recent.error) fail("shared_template_versions (recent)", recent.error);
+  const map = (rows: Record<string, unknown>[] | null) => (rows ?? []).map((row) => toVersion(row, templates));
+  return { drafts: map(drafts.data), published: map(published.data), recent: map(recent.data), templateCount: templates.size };
+}
+
+export type TemplateReview = { decision: string; reviewerLabel: string; reason: string | null; decidedAt: string };
+
+/** One version, the template's current published version, its review history and the database's own diff. */
+export async function templateVersionDetail(admin: AdminContext, versionId: string): Promise<{
+  version: TemplateVersionRow;
+  current: TemplateVersionRow | null;
+  reviews: TemplateReview[];
+  changes: { field: string; before: string; after: string }[];
+} | null> {
+  const { data: row, error } = await admin.db.from("shared_template_versions").select(VERSION_COLUMNS).eq("id", versionId).maybeSingle();
+  if (error) fail("shared_template_versions", error);
+  if (!row) return null;
+  const templates = await templateIndex(admin);
+  const version = toVersion(row, templates);
+  const [currentRes, reviewsRes, diffRes] = await Promise.all([
+    admin.db.from("shared_template_versions").select(VERSION_COLUMNS).eq("template_id", version.templateId).eq("status", "published").maybeSingle(),
+    admin.db
+      .from("shared_template_reviews")
+      .select("decision, reviewer_label, reason, decided_at")
+      .eq("version_id", versionId)
+      .order("decided_at", { ascending: true })
+      .limit(50),
+    admin.db.rpc("shared_template_diff", { p_version_id: versionId }),
+  ]);
+  if (currentRes.error) fail("shared_template_versions (current)", currentRes.error);
+  if (reviewsRes.error) fail("shared_template_reviews", reviewsRes.error);
+  if (diffRes.error) fail("shared_template_diff", diffRes.error);
+  const current = currentRes.data && currentRes.data.id !== versionId ? toVersion(currentRes.data, templates) : null;
+  const diff = (diffRes.data ?? {}) as { changes?: { field: string; before: string; after: string }[] };
+  return {
+    version,
+    current,
+    reviews: (reviewsRes.data ?? []).map((r) => ({
+      decision: r.decision as string,
+      reviewerLabel: r.reviewer_label as string,
+      reason: (r.reason as string | null) ?? null,
+      decidedAt: r.decided_at as string,
+    })),
+    changes: Array.isArray(diff.changes) ? diff.changes : [],
+  };
+}
+
+export async function officialDomains(admin: AdminContext): Promise<{ host: string; matchKind: string; authority: string }[]> {
+  const { data, error } = await admin.db.from("official_source_domains").select("host, match_kind, authority").limit(500);
+  if (error) fail("official_source_domains", error);
+  return (data ?? []).map((d) => ({ host: d.host as string, matchKind: d.match_kind as string, authority: d.authority as string }));
+}
+
+/**
+ * Pre-check that mirrors app.platform_template_reviewer(): an active firm_owner/licensed_consultant membership with a
+ * consultant credential whose register status is active and that is not suspended or revoked. Display only — the
+ * database re-checks (including the credential status rules) when the reviewer approves.
+ */
+export async function reviewerLicence(admin: AdminContext, userId: string): Promise<{ label: string } | null> {
+  const { data: members, error } = await admin.db
+    .from("memberships")
+    .select("id, organization_id")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .in("role", ["firm_owner", "licensed_consultant"])
+    .limit(50);
+  if (error) fail("memberships", error);
+  if (!members?.length) return null;
+  const { data: creds, error: credError } = await admin.db
+    .from("consultant_credentials")
+    .select("licence_type, college_id, membership_id, organization_id, register_status, entitlement_to_practise, discipline_revoked, discipline_suspended, checked_at")
+    .in("membership_id", members.map((m) => m.id as string))
+    .eq("register_status", "active")
+    .order("checked_at", { ascending: false })
+    .limit(20);
+  if (credError) fail("consultant_credentials", credError);
+  const orgOf = new Map(members.map((m) => [m.id as string, m.organization_id as string]));
+  const ok = (creds ?? []).find(
+    (c) =>
+      orgOf.get(c.membership_id as string) === c.organization_id &&
+      c.entitlement_to_practise !== false &&
+      c.discipline_revoked !== true &&
+      c.discipline_suspended !== true,
+  );
+  return ok ? { label: `${ok.licence_type as string} ${ok.college_id as string}` } : null;
+}

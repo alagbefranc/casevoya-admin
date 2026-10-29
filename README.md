@@ -2,10 +2,10 @@
 
 Platform operations console for Casevoya, served at **https://admin.casevoya.ca**.
 
-Casevoya is software only (decision 2026-10-29). This console runs the platform: firms, delivery
-health, service notices and support access. It publishes no immigration content and has no
-licensed-review step. Each firm's own licensed members build and approve their own templates and
-program packs inside the main app.
+This console runs the platform: firms, delivery health, service notices, support access and
+**shared template releases** (ADM-03). Casevoya publishes central templates; Francis's licensed
+immigration person (the reviewer, identity TBD) confirms each version before release; each firm can
+still edit its own copy. See [docs/TEMPLATES.md](docs/TEMPLATES.md).
 
 ## Stack
 
@@ -37,7 +37,7 @@ only, with the service-role key held as a Worker secret.
 | Service notices | Post, update and resolve maintenance / incident / info notices (ADM-04) |
 | Support access | Request and cancel firm-approved support access (SEC-04/09); list and history |
 
-Template releases and licensed review are deliberately absent: template approval is firm-side only.
+Template releases: approve/reject run in the licensed reviewer's own Supabase session with a fresh TOTP step-up, never as the service role and never by the draft's author (docs/TEMPLATES.md).
 
 ## Develop
 

@@ -3,7 +3,8 @@
 // independent MFA required). No workers.dev or preview URLs, so Access is the only way in, and the
 // app re-verifies the Access JWT itself on every page and server action.
 //
-// Secrets (set with `wrangler secret put`, never in this file): SUPABASE_SECRET_KEY.
+// Secrets (set by scripts/set-worker-secret.sh, never in this file): SUPABASE_SECRET_KEY,
+// SUPABASE_PUBLISHABLE_KEY (used only to sign the template reviewer in with their own session).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "casevoya-admin",
@@ -27,7 +28,10 @@
     "CF_ACCESS_TEAM_DOMAIN": "orange-resonance-3cfd.cloudflareaccess.com",
     // Audience tag of the Access application (public; it is inside every Access JWT).
     "CF_ACCESS_AUD": "a3f3f4c08ee4828a820661fbd1955ed9994243b6e6ec848864f1a53475207825",
-    "ADMIN_ALLOWED_EMAILS": "admin@casevoya.ca"
+    "ADMIN_ALLOWED_EMAILS": "admin@casevoya.ca",
+    // The licensed template reviewer(s) (Francis's immigration person, email TBD). Must also be in
+    // ADMIN_ALLOWED_EMAILS and on the Access policy. Empty = nobody can approve or reject yet.
+    "TEMPLATE_REVIEWER_EMAILS": ""
   },
   "observability": {
     "enabled": true,

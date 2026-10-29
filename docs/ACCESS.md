@@ -14,3 +14,9 @@ domain `orange-resonance-3cfd.cloudflareaccess.com`).
 
 The app verifies the Access JWT itself as well (see `src/lib/access.ts`), so removing the Access
 application would lock the portal rather than open it.
+
+## Adding the template reviewer
+
+When Francis names the licensed immigration person, add their email to the "Casevoya admin"
+policy's include list (keep MFA required), then to `ADMIN_ALLOWED_EMAILS` and
+`TEMPLATE_REVIEWER_EMAILS` in `wrangler.jsonc`. See [TEMPLATES.md](TEMPLATES.md).

@@ -30,6 +30,8 @@ const env: AdminEnv = {
   accessTeamDomain: team,
   accessAud: aud,
   allowedEmails: ["admin@casevoya.ca"],
+  supabasePublishableKey: null,
+  reviewerEmails: [],
 };
 
 describe("verifyAccessJwt", () => {
