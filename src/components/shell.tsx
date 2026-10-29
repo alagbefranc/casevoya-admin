@@ -7,6 +7,7 @@ export const NAV = [
   { href: "/health", label: "Service health" },
   { href: "/notices", label: "Service notices" },
   { href: "/support", label: "Support access" },
+  { href: "/templates", label: "Shared templates" },
 ];
 
 export function Shell({ email, children }: { email: string; children: React.ReactNode }) {

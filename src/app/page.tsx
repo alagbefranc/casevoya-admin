@@ -11,9 +11,9 @@ export default async function Home() {
     <Shell email={result.admin.email}>
       <h1>Platform operations</h1>
       <p className="lede">
-        Casevoya is software only. This console runs the platform: firms, delivery health, service notices and support
-        access. It publishes no immigration content; each firm&apos;s own licensed members build and approve their own
-        templates in the app.
+        This console runs the platform: firms, delivery health, service notices, support access and shared template
+        releases. Casevoya publishes central templates once its licensed reviewer confirms them; each firm can still
+        edit its own copy.
       </p>
       <ul>
         {NAV.filter((item) => item.href !== "/").map((item) => (
