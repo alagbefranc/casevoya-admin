@@ -5,6 +5,7 @@ import { fromDbError } from "@/lib/api/errors";
 import { AdminDenied } from "@/lib/guard";
 import { describeToken, stepUpIsFresh } from "@/lib/session";
 import { phaseOf } from "@/lib/api/modules/notices";
+import { durationMinutes } from "@/lib/api/modules/incidents";
 import { readCiccCsv, CsvError } from "@/lib/api/cicc-csv";
 import { sourcesForDb, torontoToday } from "@/lib/templates";
 import { ID, ME, NOW, ORG, auditCalls, deps, fakeDb, req } from "./api-helpers";
@@ -238,5 +239,40 @@ describe("errors and helpers", () => {
     expect(sourcesForDb([{ url: "https://www.canada.ca/en/x.html" }], "2026-10-29")).toEqual([
       { url: "https://www.canada.ca/en/x.html", title: "www.canada.ca/en/x.html", retrieved_on: "2026-10-29", note: null },
     ]);
+  });
+});
+
+describe("designer pages", () => {
+  it("returns stubs flagged as gaps", async () => {
+    for (const url of ["/releases/app-notes", "/privacy/breaches"]) {
+      const res = await handle(req("GET", url), ENDPOINTS, deps({}));
+      const out = (await body(res)).data as { items: unknown[]; stub: boolean; gap: string };
+      expect(out).toMatchObject({ items: [], stub: true });
+      expect(out.gap).toMatch(/No data source yet/);
+    }
+  });
+  it("derives switches from settings with an enabled boolean", async () => {
+    const d = deps({ db: fakeDb({}, { product_settings: [{ key: "a.enabled", value: { enabled: true } }, { key: "trial.duration", value: { unit: "days", count: 14 } }] }) });
+    const out = (await body(await handle(req("GET", "/config"), ENDPOINTS, d))).data as { switches: { key: string }[]; featureFlags: { stub: boolean } };
+    expect(out.switches.map((s) => s.key)).toEqual(["a.enabled"]);
+    expect(out.featureFlags.stub).toBe(true);
+  });
+  it("changes a setting as the owner's own session and audits before/after", async () => {
+    const d = deps({ session: "fresh", db: fakeDb({}, { product_settings: [{ key: "trial.duration", value: { unit: "days", count: 14 } }] }) });
+    const res = await handle(req("PATCH", "/config/settings/trial.duration", { value: { unit: "days", count: 21 }, reason: "Pilot request" }), ENDPOINTS, d);
+    expect(res.status).toBe(200);
+    expect(d.userDb.calls[0]).toMatchObject({ fn: "set_product_setting", args: { p_key: "trial.duration", p_value: { unit: "days", count: 21 } } });
+    expect(auditCalls(d.db)[0].args).toMatchObject({ p_action: "admin_portal.config.setting_changed", p_result: "success" });
+    expect((auditCalls(d.db)[0].args as { p_context: Record<string, unknown> }).p_context).toMatchObject({ key: "trial.duration", before: { unit: "days", count: 14 } });
+  });
+  it("404s an unknown setting without calling the database function", async () => {
+    const d = deps({ session: "fresh" });
+    const res = await handle(req("PATCH", "/config/settings/nope.key", { value: { enabled: true }, reason: "Try it" }), ENDPOINTS, d);
+    expect(res.status).toBe(404);
+    expect(d.userDb.calls).toEqual([]);
+  });
+  it("computes incident duration", () => {
+    expect(durationMinutes({ starts_at: "2026-10-29T10:00:00Z", published_at: null, resolved_at: "2026-10-29T11:30:00Z" })).toBe(90);
+    expect(durationMinutes({ starts_at: null, published_at: "2026-10-29T10:00:00Z", resolved_at: null })).toBeNull();
   });
 });

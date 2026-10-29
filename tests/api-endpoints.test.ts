@@ -123,6 +123,18 @@ const CASES: Case[] = [
   { method: "PATCH", path: "/admins/:id/role", url: `/admins/${OTHER}/role`, body: { role: "operator" }, bad: { url: `/admins/${OTHER}/role`, body: { role: "god" } }, deny: "operator", calls: "platform_admin_set_role", on: "user", session: "fresh" },
   { method: "PATCH", path: "/admins/:id/reviewer", url: `/admins/${OTHER}/reviewer`, body: { templateReviewer: true }, bad: { url: `/admins/${OTHER}/reviewer`, body: { templateReviewer: "maybe" } }, deny: "operator", calls: "platform_admin_set_reviewer", on: "user", session: "fresh" },
   { method: "POST", path: "/admins/:id/remove", url: `/admins/${OTHER}/remove`, body: { reason: "Left the team", confirmEmail: "ops@mail.grokbot.com" }, bad: { url: `/admins/${OTHER}/remove`, body: { reason: "x", confirmEmail: "ops@mail.grokbot.com" } }, deny: "operator", calls: "platform_admin_remove", on: "user", session: "fresh", rpcs: { platform_admin_list: { admins: [{ user_id: OTHER, email: "ops@mail.grokbot.com" }] } } },
+  // Designer pages (Usage, Incidents, Releases, Config, Privacy, Verification, Sample mode, Migration).
+  { method: "GET", path: "/usage", url: "/usage?flaggedOnly=true&sort=storage_desc", bad: { url: "/usage?sort=biggest" }, deny: null, calls: "platform_usage", rpcs: { platform_usage: { items: [], total: 0 } } },
+  { method: "GET", path: "/incidents", url: "/incidents?state=open&kind=both", bad: { url: "/incidents?state=closed" }, deny: null, calls: "platform_overview", rpcs: { platform_overview: { incidents: { status: "operational" }, queues: { level: "healthy" } } }, tables: { service_notices: [notice] } },
+  { method: "GET", path: "/releases/templates", url: "/releases/templates?limit=10", bad: { url: "/releases/templates?limit=0" }, deny: null, calls: "platform_template_releases" },
+  { method: "GET", path: "/releases/app-notes", url: "/releases/app-notes", bad: { url: "/releases/app-notes?offset=-1" }, deny: null, calls: "" },
+  { method: "GET", path: "/config", url: "/config", bad: { url: "/config" }, deny: null, calls: "", tables: { product_settings: [{ key: "documents.large_uploads_enabled", value: { enabled: false }, description: "d", pending_confirmation: false }] } },
+  { method: "PATCH", path: "/config/settings/:key", url: "/config/settings/trial.duration", body: { value: { unit: "days", count: 21 }, reason: "Pilot firms asked for longer", code: "123456" }, bad: { url: "/config/settings/trial.duration", body: { value: "21", reason: "x" } }, deny: "operator", calls: "set_product_setting", on: "user", session: "fresh", tables: { product_settings: [{ key: "trial.duration", value: { unit: "days", count: 14 } }] } },
+  { method: "GET", path: "/privacy/requests", url: `/privacy/requests?state=overdue&organizationId=${ORG}`, bad: { url: "/privacy/requests?state=late" }, deny: null, calls: "platform_privacy_requests" },
+  { method: "GET", path: "/privacy/breaches", url: "/privacy/breaches", bad: { url: "/privacy/breaches?limit=999" }, deny: null, calls: "" },
+  { method: "GET", path: "/verification/summary", url: "/verification/summary", bad: { url: "/verification/summary" }, deny: null, calls: "platform_cicc_imports", rpcs: { platform_overview: { firms: { by_verification: { verified: 1 } }, licences: {}, verification_workload: {} }, platform_cicc_imports: { imports: [{ id: ID }] } } },
+  { method: "GET", path: "/sample-mode", url: "/sample-mode", bad: { url: "/sample-mode?limit=abc" }, deny: null, calls: "platform_sample_overview" },
+  { method: "GET", path: "/migration/jobs", url: "/migration/jobs?status=stuck", bad: { url: "/migration/jobs?status=running" }, deny: null, calls: "platform_migration_jobs" },
 ];
 
 describe("endpoint coverage", () => {

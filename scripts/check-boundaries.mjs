@@ -30,6 +30,8 @@ const READABLE = new Set([
   "shared_template_reviews",
   "official_source_domains",
   "consultant_credentials",
+  // Config page: platform settings (no firm data).
+  "product_settings",
 ]);
 
 // Functions that run as the signed-in admin (their own Supabase session), never as the service role.
@@ -45,6 +47,7 @@ const USER_SESSION_RPCS = new Set([
   "platform_admin_set_reviewer",
   "platform_admin_remove",
   "accept_platform_admin_invite",
+  "set_product_setting",
 ]);
 
 function walk(dir) {

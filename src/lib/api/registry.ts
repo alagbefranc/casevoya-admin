@@ -10,6 +10,14 @@ import { sessionEndpoints } from "./modules/session";
 import { subscriptionEndpoints } from "./modules/subscriptions";
 import { supportEndpoints } from "./modules/support";
 import { templateEndpoints } from "./modules/templates";
+import { usageEndpoints } from "./modules/usage";
+import { incidentEndpoints } from "./modules/incidents";
+import { releaseEndpoints } from "./modules/releases";
+import { configEndpoints } from "./modules/config";
+import { privacyEndpoints } from "./modules/privacy";
+import { verificationEndpoints } from "./modules/verification";
+import { sampleEndpoints } from "./modules/sample";
+import { migrationEndpoints } from "./modules/migration";
 
 /** Every /api/admin endpoint. Static paths are listed before parameterised ones inside each module. */
 export const ENDPOINTS: Endpoint[] = [
@@ -24,4 +32,12 @@ export const ENDPOINTS: Endpoint[] = [
   ...templateEndpoints,
   ...auditEndpoints,
   ...adminEndpoints,
+  ...usageEndpoints,
+  ...incidentEndpoints,
+  ...releaseEndpoints,
+  ...configEndpoints,
+  ...privacyEndpoints,
+  ...verificationEndpoints,
+  ...sampleEndpoints,
+  ...migrationEndpoints,
 ];

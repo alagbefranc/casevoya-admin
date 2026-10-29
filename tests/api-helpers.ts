@@ -40,7 +40,7 @@ export function fakeDb(rpcs: Record<string, RpcResult> = {}, tables: Record<stri
       reads.push(table);
       const rows = tables[table] ?? [];
       const builder: Record<string, unknown> = {};
-      for (const m of ["select", "eq", "in", "order", "range", "limit"]) builder[m] = () => builder;
+      for (const m of ["select", "eq", "neq", "in", "order", "range", "limit"]) builder[m] = () => builder;
       builder.maybeSingle = async () => ({ data: rows[0] ?? null, error: null });
       builder.then = (resolve: (v: unknown) => unknown) => resolve({ data: rows, error: null, count: rows.length });
       return builder;

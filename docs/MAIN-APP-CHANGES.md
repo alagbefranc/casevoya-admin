@@ -60,3 +60,19 @@ without a fresh step-up, and anyone without an active licence; approve keeps ref
     wrapper for `app.replay_outbox_event` when retries are wanted (not at launch).
 12. Rollback screen for `rollback_shared_template_version` (same reviewer session) — not built yet.
 13. Docs: support-access.md and DATABASE.md still say "Not applied on the live project" for live tables.
+
+## Added for the Designer pages (casevoya PR #283, migration `20261029220000`, applied 2026-10-29)
+
+Five service-role-only, metadata-only reads, each guarded by `app.platform_read_allowed()`:
+`platform_usage`, `platform_privacy_requests`, `platform_sample_overview`, `platform_migration_jobs`,
+`platform_template_releases`. The Config page writes through the existing `set_product_setting`
+(own session, platform admin at step-up).
+
+Still missing in the main app (the portal shows a stub and the spec flags the gap):
+
+- a `release_notes` table written at deploy time (Releases > App release notes);
+- a feature-flag store with per-firm or percentage targeting (Config > Feature flags);
+- a breach (privacy incident) register (Privacy > Breach register);
+- `product.setting_changed` is not in the `platform_audit_log` families, so the database's own event
+  for a setting change does not show in Audit log; the portal's `admin_portal.config.setting_changed`
+  entry does.
