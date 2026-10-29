@@ -1,0 +1,41 @@
+{
+  "name": "casevoya-admin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3100",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "verify": "pnpm check:boundaries && pnpm lint && pnpm typecheck && pnpm test",
+    "build:workers": "opennextjs-cloudflare build",
+    "deploy": "bash scripts/deploy.sh ."
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
+    "jose": "^6.1.0",
+    "next": "16.4.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@opennextjs/cloudflare": "^1.20.12",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.2",
+    "typescript": "^5",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.1"
+  },
+  "packageManager": "pnpm@10.34.6",
+  "engines": {
+    "node": ">=20"
+  }
+}

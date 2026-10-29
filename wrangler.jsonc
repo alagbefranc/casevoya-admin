@@ -1,0 +1,37 @@
+// casevoya-admin on Cloudflare Workers, built with OpenNext. Served only at admin.casevoya.ca,
+// which is behind the Cloudflare Access application "Casevoya admin" (admin@casevoya.ca only,
+// independent MFA required). No workers.dev or preview URLs, so Access is the only way in, and the
+// app re-verifies the Access JWT itself on every page and server action.
+//
+// Secrets (set with `wrangler secret put`, never in this file): SUPABASE_SECRET_KEY.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "casevoya-admin",
+  "main": ".open-next/worker.js",
+  "account_id": "c8010438fc56280e3ea5747a123e818a",
+  "compatibility_date": "2026-10-17",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "admin.casevoya.ca", "custom_domain": true }],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    // OpenNext self-reference; the service name must match the Worker name.
+    { "binding": "WORKER_SELF_REFERENCE", "service": "casevoya-admin" }
+  ],
+  "vars": {
+    "SUPABASE_URL": "https://aqjtvqmojfamtspzyeqm.supabase.co",
+    "CF_ACCESS_TEAM_DOMAIN": "orange-resonance-3cfd.cloudflareaccess.com",
+    // Audience tag of the Access application (public; it is inside every Access JWT).
+    "CF_ACCESS_AUD": "a3f3f4c08ee4828a820661fbd1955ed9994243b6e6ec848864f1a53475207825",
+    "ADMIN_ALLOWED_EMAILS": "admin@casevoya.ca"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "enabled": true, "invocation_logs": true, "persist": true }
+  }
+}
