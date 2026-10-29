@@ -60,18 +60,17 @@ export default async function TemplateVersionPage({
     templateVersionDetail(admin, id),
     officialDomains(admin),
     reviewerLicence(admin, admin.userId),
-    peekReviewerSession(),
+    peekReviewerSession(admin),
   ]);
   if (!detail) notFound();
   const { version: v, current, reviews, changes } = detail;
   const flash = flashParams(await searchParams);
   const { evidence, sources } = splitEvidence(v.testEvidence);
   const citations = extractCitations([sources.join("\n"), evidence, v.changelog, v.body.summary, ...v.body.items], domains);
-  const flagged = admin.env.reviewerEmails.includes(admin.email);
+  const flagged = admin.templateReviewer;
   const blockers = reviewBlockers({
-    email: admin.email,
     userId: admin.userId,
-    reviewerEmails: admin.env.reviewerEmails,
+    templateReviewer: admin.templateReviewer,
     hasPublishableKey: Boolean(admin.env.supabasePublishableKey),
     version: v,
     licensed: Boolean(licence),

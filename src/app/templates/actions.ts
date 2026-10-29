@@ -6,7 +6,7 @@ import { requireAdmin } from "@/lib/guard";
 import { officialDomains, reviewerLicence, templateVersionDetail } from "@/lib/data";
 import { firstIssue, text, uuid } from "@/lib/forms";
 import { ReviewerError, asReviewer, signInReviewer, signOutReviewer } from "@/lib/reviewer";
-import { BLOCKER_TEXT, composeEvidence, draftSchema, lines, reasonSchema, reviewBlockers, totpSchema, type ReviewBlocker } from "@/lib/templates";
+import { BLOCKER_TEXT, composeEvidence, draftSchema, lines, reasonSchema, reviewBlockers, sourcesForDb, totpSchema, type ReviewBlocker } from "@/lib/templates";
 
 function back(path: string, kind: "ok" | "error", message: string): never {
   redirect(`${path}?${kind}=${encodeURIComponent(message.slice(0, 280))}`);
@@ -45,6 +45,12 @@ export async function createDraft(form: FormData) {
     p_changelog: v.changelog,
   });
   if (error) back("/templates", "error", error.message);
+  const sources = await admin.db.rpc("set_shared_template_version_sources", {
+    p_version_id: String(data),
+    p_sources: sourcesForDb(v.sources.map((url) => ({ url }))),
+    p_actor: admin.userId,
+  });
+  if (sources.error) back(`/templates/${String(data)}`, "error", `Draft saved, but its sources were not: ${sources.error.message}`);
   revalidatePath("/templates");
   redirect(`/templates/${String(data)}?ok=${encodeURIComponent("Draft saved. It waits for the licensed reviewer.")}`);
 }
@@ -82,6 +88,12 @@ export async function reviseDraft(form: FormData) {
     p_changelog: v.changelog,
   });
   if (error) back(path, "error", error.message);
+  const sources = await admin.db.rpc("set_shared_template_version_sources", {
+    p_version_id: id.data,
+    p_sources: sourcesForDb(v.sources.map((url) => ({ url }))),
+    p_actor: admin.userId,
+  });
+  if (sources.error) back(path, "error", `Draft revised, but its sources were not: ${sources.error.message}`);
   revalidatePath(path);
   back(path, "ok", "Draft revised.");
 }
@@ -90,7 +102,7 @@ export async function reviseDraft(form: FormData) {
 export async function reviewerSignIn(form: FormData) {
   const admin = await requireAdmin();
   const next = uuid.safeParse(text(form, "next")).success ? `/templates/${text(form, "next")}` : "/templates";
-  if (!admin.env.reviewerEmails.includes(admin.email)) back(next, "error", BLOCKER_TEXT.not_flagged);
+  if (!admin.templateReviewer) back(next, "error", BLOCKER_TEXT.not_flagged);
   const password = form.get("password");
   const code = totpSchema.safeParse(text(form, "code"));
   if (typeof password !== "string" || !password) back(next, "error", "Enter your password.");
@@ -120,9 +132,8 @@ async function decide(form: FormData, extra: (path: string) => void) {
   if (!detail) back(path, "error", "Unknown version");
   const licence = await reviewerLicence(admin, admin.userId);
   const blockers = reviewBlockers({
-    email: admin.email,
     userId: admin.userId,
-    reviewerEmails: admin.env.reviewerEmails,
+    templateReviewer: admin.templateReviewer,
     hasPublishableKey: Boolean(admin.env.supabasePublishableKey),
     version: detail.version,
     licensed: Boolean(licence),

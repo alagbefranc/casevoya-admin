@@ -37,7 +37,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
   const result = await gate();
   if (!result.ok) return <Denied reason={result.reason} />;
   const admin = result.admin;
-  const [overview, licence, session] = await Promise.all([templateOverview(admin), reviewerLicence(admin, admin.userId), peekReviewerSession()]);
+  const [overview, licence, session] = await Promise.all([templateOverview(admin), reviewerLicence(admin, admin.userId), peekReviewerSession(admin)]);
   const flash = flashParams(await searchParams);
   return (
     <Shell email={admin.email}>
@@ -49,7 +49,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
       </p>
       <Flash {...flash} />
       <ReviewerPanel
-        flagged={admin.env.reviewerEmails.includes(admin.email)}
+        flagged={admin.templateReviewer}
         hasKey={Boolean(admin.env.supabasePublishableKey)}
         licenceLabel={licence?.label ?? null}
         session={session}

@@ -8,9 +8,8 @@ const domains = [
 ];
 
 const base = {
-  email: "reviewer@casevoya.ca",
   userId: "u-reviewer",
-  reviewerEmails: ["reviewer@casevoya.ca"],
+  templateReviewer: true,
   hasPublishableKey: true,
   version: { status: "draft", authorUserId: "u-author" },
   licensed: true,
@@ -25,15 +24,12 @@ describe("reviewBlockers", () => {
     expect(reviewBlockers({ ...base, version: { status: "draft", authorUserId: "u-reviewer" } })).toContain("is_author");
   });
   it("requires the reviewer flag, a licence, a key, an open draft and the right session", () => {
-    expect(reviewBlockers({ ...base, reviewerEmails: [] })).toContain("not_flagged");
+    expect(reviewBlockers({ ...base, templateReviewer: false })).toContain("not_flagged");
     expect(reviewBlockers({ ...base, licensed: false })).toContain("no_licence");
     expect(reviewBlockers({ ...base, hasPublishableKey: false })).toContain("no_publishable_key");
     expect(reviewBlockers({ ...base, version: { status: "published", authorUserId: "u-author" } })).toContain("not_draft");
     expect(reviewBlockers({ ...base, sessionUserId: null })).toContain("no_session");
     expect(reviewBlockers({ ...base, sessionUserId: "someone-else" })).toContain("session_mismatch");
-  });
-  it("matches the reviewer flag case-insensitively", () => {
-    expect(reviewBlockers({ ...base, email: "Reviewer@Casevoya.ca" })).toEqual([]);
   });
 });
 
@@ -93,13 +89,13 @@ describe("draftSchema", () => {
 
 describe("reviewer config", () => {
   const env = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_SECRET_KEY: "k", CF_ACCESS_TEAM_DOMAIN: "t.cloudflareaccess.com", CF_ACCESS_AUD: "a", ADMIN_ALLOWED_EMAILS: "admin@casevoya.ca" };
-  it("defaults to no reviewers and no publishable key", () => {
-    expect(readEnv(env)).toMatchObject({ reviewerEmails: [], supabasePublishableKey: null });
-  });
-  it("refuses a reviewer who is not an allowed admin", () => {
-    expect(() => readEnv({ ...env, TEMPLATE_REVIEWER_EMAILS: "someone@else.ca" })).toThrow(/TEMPLATE_REVIEWER_EMAILS/);
-    expect(readEnv({ ...env, ADMIN_ALLOWED_EMAILS: "admin@casevoya.ca, r@x.ca", TEMPLATE_REVIEWER_EMAILS: "R@x.ca" }).reviewerEmails).toEqual(["r@x.ca"]);
+  it("defaults to no publishable key and the production admin origin", () => {
+    expect(readEnv(env)).toMatchObject({ supabasePublishableKey: null, adminOrigin: "https://admin.casevoya.ca" });
     expect(parseEmails("")).toEqual([]);
+  });
+  it("takes an https ADMIN_ORIGIN and refuses anything else", () => {
+    expect(readEnv({ ...env, ADMIN_ORIGIN: "https://staging-admin.casevoya.ca/" }).adminOrigin).toBe("https://staging-admin.casevoya.ca");
+    expect(() => readEnv({ ...env, ADMIN_ORIGIN: "http://admin.casevoya.ca" })).toThrow(/ADMIN_ORIGIN/);
   });
   it("refuses a secret key in the publishable slot", () => {
     expect(() => readEnv({ ...env, SUPABASE_PUBLISHABLE_KEY: "sb_secret_abc" })).toThrow(/publishable/);

@@ -123,7 +123,7 @@ export type ReviewBlocker =
   | "session_mismatch";
 
 export const BLOCKER_TEXT: Record<ReviewBlocker, string> = {
-  not_flagged: "You are not flagged as the licensed template reviewer (TEMPLATE_REVIEWER_EMAILS).",
+  not_flagged: "You are not flagged as a template reviewer (an owner turns this on under Admins).",
   no_publishable_key: "The Worker has no SUPABASE_PUBLISHABLE_KEY, so a reviewer cannot sign in.",
   is_author: "You wrote this draft. The author can never approve their own version.",
   not_draft: "This version is not waiting for review.",
@@ -134,16 +134,16 @@ export const BLOCKER_TEXT: Record<ReviewBlocker, string> = {
 
 /** Why this admin cannot approve/reject this version right now. Empty means the buttons are shown. */
 export function reviewBlockers(input: {
-  email: string;
   userId: string;
-  reviewerEmails: string[];
+  /** platform_admins.template_reviewer for the caller. */
+  templateReviewer: boolean;
   hasPublishableKey: boolean;
   version: { status: string; authorUserId: string | null };
   licensed: boolean;
   sessionUserId: string | null;
 }): ReviewBlocker[] {
   const out: ReviewBlocker[] = [];
-  if (!input.reviewerEmails.includes(input.email.toLowerCase())) out.push("not_flagged");
+  if (!input.templateReviewer) out.push("not_flagged");
   if (!input.hasPublishableKey) out.push("no_publishable_key");
   if (input.version.status !== "draft") out.push("not_draft");
   if (input.version.authorUserId && input.version.authorUserId === input.userId) out.push("is_author");
@@ -164,4 +164,25 @@ export function peekJwt(token: string | null | undefined): { sub?: string; exp?:
   } catch {
     return null;
   }
+}
+
+/** Today's date in Toronto (the database's calendar for source dates). */
+export function torontoToday(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+
+export type SourceInput = { url: string; title?: string | null; retrievedOn?: string | null; note?: string | null };
+
+/** The rows set_shared_template_version_sources takes. A link without a title is titled by its host and path. */
+export function sourcesForDb(sources: SourceInput[], today = torontoToday()): { url: string; title: string; retrieved_on: string; note: string | null }[] {
+  return sources.map((s) => {
+    let fallback = s.url;
+    try {
+      const u = new URL(s.url);
+      fallback = `${u.hostname}${u.pathname === "/" ? "" : u.pathname}`;
+    } catch {
+      /* keep the raw url */
+    }
+    return { url: s.url.trim(), title: (s.title?.trim() || fallback).slice(0, 200), retrieved_on: s.retrievedOn || today, note: s.note?.trim() || null };
+  });
 }

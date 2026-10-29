@@ -18,5 +18,21 @@ application would lock the portal rather than open it.
 ## Adding the template reviewer
 
 When Francis names the licensed immigration person, add their email to the "Casevoya admin"
-policy's include list (keep MFA required), then to `ADMIN_ALLOWED_EMAILS` and
-`TEMPLATE_REVIEWER_EMAILS` in `wrangler.jsonc`. See [TEMPLATES.md](TEMPLATES.md).
+policy's include list (keep MFA required) and to `ADMIN_ALLOWED_EMAILS` in `wrangler.jsonc`, then an
+owner invites them from the Admins page with "template reviewer" ticked (the flag is the
+`platform_admins.template_reviewer` column). See [TEMPLATES.md](TEMPLATES.md).
+
+## Adding any new admin
+
+1. Access policy include list + `ADMIN_ALLOWED_EMAILS` (PR, merge, `bash scripts/deploy.sh .`).
+2. An owner invites the email from the Admins page (`POST /api/admin/admins/invites`, fresh step-up).
+   No email is sent; tell the person yourself.
+3. They sign in through Access, sign in to their Casevoya account (password + authenticator) on the
+   portal and accept the invite (`POST /api/admin/session/accept-invite`) within the invite's 1–30 days.
+
+## API requests
+
+`/api/admin/*` sits behind the same Access application, so an unauthenticated request gets Access's
+302 to the login page. Behind Access the handler re-verifies the JWT, then checks `platform_admins`,
+the Origin header on mutations (`ADMIN_ORIGIN`), the role, the input and, where needed, the admin's own
+Supabase session and step-up. See docs/API.md.

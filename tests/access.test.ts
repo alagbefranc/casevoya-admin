@@ -31,7 +31,7 @@ const env: AdminEnv = {
   accessAud: aud,
   allowedEmails: ["admin@casevoya.ca"],
   supabasePublishableKey: null,
-  reviewerEmails: [],
+  adminOrigin: "https://admin.casevoya.ca",
 };
 
 describe("verifyAccessJwt", () => {
@@ -66,15 +66,16 @@ describe("evaluateGate", () => {
   const fakeClient = () => ({}) as never;
 
   it("passes only when Access verifies and a platform_admins row exists", async () => {
-    const ctx = await evaluateGate({ token: "t", env, verify: okVerify, lookupUser: async () => "u1", isPlatformAdmin: async () => true, makeClient: fakeClient });
+    const ctx = await evaluateGate({ token: "t", env, verify: okVerify, lookupUser: async () => "u1", adminRecord: async () => ({ role: "owner", templateReviewer: false }), makeClient: fakeClient });
     expect(ctx.userId).toBe("u1");
+    expect(ctx.role).toBe("owner");
   });
   it("refuses when there is no auth user (before bootstrap)", async () => {
     await expect(evaluateGate({ token: "t", env, verify: okVerify, lookupUser: async () => null, makeClient: fakeClient })).rejects.toMatchObject({ reason: "no_auth_user" });
   });
   it("refuses when there is no platform_admins row", async () => {
     await expect(
-      evaluateGate({ token: "t", env, verify: okVerify, lookupUser: async () => "u1", isPlatformAdmin: async () => false, makeClient: fakeClient }),
+      evaluateGate({ token: "t", env, verify: okVerify, lookupUser: async () => "u1", adminRecord: async () => null, makeClient: fakeClient }),
     ).rejects.toMatchObject({ reason: "not_platform_admin" });
   });
   it("never looks up the database when Access refuses", async () => {

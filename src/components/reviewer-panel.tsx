@@ -19,7 +19,7 @@ export function ReviewerPanel(props: {
       {flagged ? <span className="pill ok">flagged</span> : <span className="pill">not flagged</span>}{" "}
       {licenceLabel ? <span className="pill ok">licence {licenceLabel}</span> : <span className="pill warn">no verified licence on file</span>}
       <p className="hint" style={{ margin: "6px 0" }}>
-        Only an admin listed in TEMPLATE_REVIEWER_EMAILS, holding an active verified licence, and signed in below as
+        Only an admin with the template reviewer flag (set by an owner under Admins), holding an active verified licence, and signed in below as
         themselves can approve or reject. The draft&apos;s author never can. The database enforces the same rules.
       </p>
       {!flagged ? null : !hasKey ? (
