@@ -11,7 +11,8 @@ page, with request/response shapes, rules and workflows, is **docs/FRONTEND-SPEC
    Supabase auth user, `platform_admins` row (or an open invite, for the session endpoints only).
 3. Mutations (POST/PATCH/PUT/DELETE): `Origin` must equal `ADMIN_ORIGIN` and `Content-Type` must be
    `application/json`, else `403 csrf_failed`.
-4. Role: GETs any role (owner, operator, viewer); mutations owner/operator; `/admins*` owner only.
+4. Role: GETs any role (owner, operator, viewer); mutations owner/operator; `/admins*` and
+   `PATCH /config/settings/:key` owner only.
 5. Template decisions: `platform_admins.template_reviewer` must be true.
 6. Input: zod; `422 validation_failed` with `details.issues[{path, message}]`.
 7. Own session: some endpoints run as the admin's own Supabase session (cookie
@@ -22,6 +23,17 @@ page, with request/response shapes, rules and workflows, is **docs/FRONTEND-SPEC
 
 Success: `{ "data": ..., "requestId": "..." }`. Error: `{ "error": { "code", "message", "details"?, "requestId" } }`.
 Headers: `cache-control: no-store`, `x-request-id`, `x-content-type-options: nosniff`.
+
+## Endpoints by Designer page
+
+Overview `/overview*` · Firms `/firms*` · Subscriptions `/subscriptions/exceptions` · Usage `/usage` ·
+Health `/health*` · Incidents `/incidents` + `/notices*` · Releases `/releases/*` + `/templates*` ·
+Config `/config*` (+ `/admins*` for owners) · Audit log `/audit` · Privacy `/privacy/*` ·
+Verification `/verification/summary` + `/licences/*` + `/firms/:id/verification` · Grants `/support/*` ·
+Sample mode `/sample-mode` · Migration `/migration/jobs` · plus `/session*` everywhere.
+
+Read-only stubs (no data source yet, response carries `stub: true` and a `gap` sentence):
+`GET /releases/app-notes`, `GET /privacy/breaches`, and `featureFlags` inside `GET /config`.
 
 ## Tests
 
