@@ -1,20 +1,21 @@
 #!/usr/bin/env node
-// One-time bootstrap of the first Casevoya platform admin (DATABASE.md "First platform admin":
-// Francis, set up through the admin portal, 2026-10-28; admin login admin@casevoya.ca, 2026-10-29).
+// One-time bootstrap of the first Casevoya platform admin (owner). NOT RUN YET: Francis gives the go-ahead.
 //
 // It refuses unless ALL of these hold:
-//   1. public.platform_admins is empty (it is a first-admin bootstrap, never a way to add more);
+//   1. public.platform_admins is empty (a first-admin bootstrap, never a way to add more; later admins
+//      are invited from the portal by an owner);
 //   2. the email is on the portal's allow list (ADMIN_ALLOWED_EMAILS in wrangler.jsonc);
-//   3. that email has already signed in to admin.casevoya.ca through Cloudflare Access (one-time PIN
-//      plus independent MFA). This is the "Francis signs in first" step: Access records the login,
-//      and this script reads it from the Access users API.
-// Then it finds (or, with --commit, creates) the auth.users row for that email (confirmed, no
-// password: the identity is only used to attribute admin actions) and adds the platform_admins row,
-// through public.bootstrap_first_platform_admin when the main repo has applied it (audited,
-// advisory-locked; see docs/main-app/bootstrap_first_platform_admin.sql), else a guarded direct insert.
+//   3. that email has already signed in to admin.casevoya.ca through Cloudflare Access (read from the
+//      Access users API);
+//   4. a Casevoya (Supabase auth) account exists for that email with a confirmed email and a verified
+//      TOTP factor: the portal's own sign-in is password + authenticator code, and every privileged
+//      action runs as that account. This script never creates accounts or passwords.
+// It then calls public.bootstrap_first_platform_admin(p_user_id, p_note), which re-checks 1 and 4 under an
+// advisory lock, inserts the owner row and writes the audit event platform_admin.bootstrapped.
+// There is no direct-insert fallback.
 //
 // Dry run by default. Prints ids and decisions, never secrets.
-//   node scripts/bootstrap-first-admin.mjs [--email admin@casevoya.ca] [--commit]
+//   node scripts/bootstrap-first-admin.mjs [--email admin@casevoya.ca] [--note "..."] [--commit]
 // Needs SUPABASE_URL, SUPABASE_SECRET_KEY and CLOUDFLARE_API_TOKEN in the environment; on the box,
 //   bash scripts/with-secrets.sh node scripts/bootstrap-first-admin.mjs
 import fs from "node:fs";
@@ -30,9 +31,10 @@ export function allowList() {
 }
 
 export function parseArgs(argv) {
-  const out = { email: "admin@casevoya.ca", commit: false };
+  const out = { email: "admin@casevoya.ca", commit: false, note: "first platform admin (bootstrap via casevoya-admin)" };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--email") out.email = String(argv[++i] ?? "").trim().toLowerCase();
+    else if (argv[i] === "--note") out.note = String(argv[++i] ?? "").trim().slice(0, 200);
     else if (argv[i] === "--commit") out.commit = true;
     else throw new Error(`Unknown argument: ${argv[i]}`);
   }
@@ -55,7 +57,7 @@ async function accessLogin(email) {
 }
 
 async function main() {
-  const { email, commit } = parseArgs(process.argv.slice(2));
+  const { email, commit, note } = parseArgs(process.argv.slice(2));
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SECRET_KEY;
   if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SECRET_KEY must be set.");
@@ -82,43 +84,26 @@ async function main() {
     userId = users.find((u) => (u.email ?? "").toLowerCase() === email)?.id ?? null;
     if (users.length < 200) break;
   }
-  console.log(userId ? `auth user exists: ${userId}` : `no auth user for ${email}; ${commit ? "creating one" : "would create one (confirmed, no password)"}.`);
+  if (!userId) {
+    throw new Error(`No Casevoya account exists for ${email}. Create it in Casevoya (confirm the email and enrol an authenticator app), then rerun.`);
+  }
+  console.log(`auth user exists: ${userId}`);
+
+  const user = await json(await rest(`/auth/v1/admin/users/${userId}`), "auth user");
+  if (!user.email_confirmed_at) throw new Error(`${email} has not confirmed their email yet.`);
+  const verifiedTotp = (user.factors ?? []).filter((f) => f.status === "verified" && (f.factor_type ?? "totp") === "totp");
+  if (!verifiedTotp.length) throw new Error(`${email} has no verified authenticator (TOTP) factor. Enrol one in Casevoya, then rerun.`);
+  console.log(`email confirmed; ${verifiedTotp.length} verified authenticator factor(s).`);
 
   if (!commit) {
-    console.log("Dry run: nothing was written. Rerun with --commit to add the platform_admins row.");
+    console.log("Dry run: nothing was written. Rerun with --commit to call bootstrap_first_platform_admin.");
     return;
   }
 
-  if (!userId) {
-    const created = await json(
-      await rest("/auth/v1/admin/users", {
-        method: "POST",
-        body: JSON.stringify({ email, email_confirm: true, app_metadata: { casevoya_platform_operator: true } }),
-      }),
-      "create auth user",
-    );
-    userId = created.id ?? created.user?.id;
-    if (!userId) throw new Error("create auth user returned no id");
-    console.log(`created auth user ${userId}`);
-  }
-
-  const note = "first platform admin (bootstrap via casevoya-admin)";
   const rpc = await rest("/rest/v1/rpc/bootstrap_first_platform_admin", { method: "POST", body: JSON.stringify({ p_user_id: userId, p_note: note }) });
-  if (rpc.ok) {
-    console.log(`platform_admins row added for ${userId} via bootstrap_first_platform_admin (audited).`);
-    return;
-  }
   const rpcBody = await rpc.json().catch(() => ({}));
-  if (rpcBody?.code !== "PGRST202") throw new Error(`bootstrap_first_platform_admin: ${rpcBody?.message ?? rpc.status}`);
-  console.log("bootstrap_first_platform_admin is not on this database yet; using a guarded direct insert.");
-  // Re-check emptiness immediately before the insert.
-  const again = await rest("/rest/v1/platform_admins?select=user_id", { headers: { Prefer: "count=exact", Range: "0-0" } });
-  if (Number((again.headers.get("content-range") ?? "*/1").split("/")[1]) !== 0) throw new Error("platform_admins is no longer empty; stopping.");
-  await json(
-    await rest("/rest/v1/platform_admins", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ user_id: userId, note, created_by: userId }) }),
-    "insert platform_admins",
-  );
-  console.log(`platform_admins row added for ${userId}.`);
+  if (!rpc.ok) throw new Error(`bootstrap_first_platform_admin: ${rpcBody?.message ?? `HTTP ${rpc.status}`}`);
+  console.log(`platform_admins owner row added for ${userId} via bootstrap_first_platform_admin (audited as platform_admin.bootstrapped).`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

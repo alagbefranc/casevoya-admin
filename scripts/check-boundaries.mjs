@@ -3,7 +3,10 @@
 //  1. Every exported function in a "use server" file calls `await requireAdmin()` as its first statement.
 //  2. Nothing reads NEXT_PUBLIC_* (nothing about the admin worker is meant for the browser).
 //  3. The service-role key is only read in src/lib/env.ts.
-//  5. The template reviewer's own session only approves/rejects; the service role never does.
+//  5. The admin's own session (publishable key) calls only the functions in USER_SESSION_RPCS, and the
+//     service role never calls those (they read auth.uid(), aal2 and a fresh step-up themselves).
+//  6. Every /api route goes through the shared handler (src/lib/api/core.ts handle), which runs the Access +
+//     platform_admins gate, CSRF, role, validation, step-up and audit for every endpoint.
 //  4. The portal reads only the platform-operations tables below (no client content tables) and
 //     never writes tables directly: every write goes through a named, audited database function.
 import fs from "node:fs";
@@ -29,6 +32,21 @@ const READABLE = new Set([
   "consultant_credentials",
 ]);
 
+// Functions that run as the signed-in admin (their own Supabase session), never as the service role.
+const USER_SESSION_RPCS = new Set([
+  "approve_shared_template_version",
+  "reject_shared_template_version",
+  "rollback_shared_template_version",
+  "record_licence_check",
+  "platform_replay_outbox_event",
+  "platform_admin_invite",
+  "platform_admin_cancel_invite",
+  "platform_admin_set_role",
+  "platform_admin_set_reviewer",
+  "platform_admin_remove",
+  "accept_platform_admin_invite",
+]);
+
 function walk(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
@@ -43,19 +61,30 @@ for (const file of walk(SRC)) {
   const text = fs.readFileSync(file, "utf8");
   if (/NEXT_PUBLIC_/.test(text)) problems.push(`${rel}: uses NEXT_PUBLIC_ (the admin worker exposes nothing to the browser)`);
   if (/SUPABASE_SECRET_KEY/.test(text) && rel !== path.join("src", "lib", "env.ts")) problems.push(`${rel}: reads SUPABASE_SECRET_KEY outside src/lib/env.ts`);
-  if (/^\s*["']use client["']/.test(text) && /@\/lib\/(guard|supabase|env|reviewer|data)/.test(text)) problems.push(`${rel}: a client component imports server-only admin code`);
+  if (/^\s*["']use client["']/.test(text) && /@\/lib\/(guard|supabase|env|reviewer|session|data|api)/.test(text)) problems.push(`${rel}: a client component imports server-only admin code`);
   for (const match of text.matchAll(/\.from\(\s*["'`]([a-z_]+)["'`]\s*\)/g)) {
     if (!READABLE.has(match[1])) problems.push(`${rel}: reads table ${match[1]}, which is not on the platform-operations allow list`);
   }
   if (/\.(insert|update|upsert|delete)\(/.test(text)) problems.push(`${rel}: writes a table directly; use a named database function (rpc) instead`);
-  // 5. The reviewer's own session (publishable key) is used for exactly two RPCs, and the service role never tries them.
-  for (const match of text.matchAll(/client\.rpc\(\s*["'`]([a-z_]+)["'`]/g)) {
-    if (!["approve_shared_template_version", "reject_shared_template_version"].includes(match[1])) {
-      problems.push(`${rel}: the reviewer session may only call approve/reject_shared_template_version, not ${match[1]}`);
-    }
+  // 5. The admin's own session calls only USER_SESSION_RPCS; the service role (db) never calls them.
+  const userCalls = [
+    ...text.matchAll(/client\.rpc\(\s*["'`]([a-z_]+)["'`]/g),
+    ...text.matchAll(/\brpc\(\s*(?:client|await userClient\(\))\s*,\s*["'`]([a-z_]+)["'`]/g),
+  ];
+  for (const match of userCalls) {
+    if (!USER_SESSION_RPCS.has(match[1])) problems.push(`${rel}: the admin's own session may not call ${match[1]} (not in USER_SESSION_RPCS)`);
   }
-  if (/db\.rpc\(\s*["'`](approve|reject|rollback)_shared_template_version/.test(text)) {
-    problems.push(`${rel}: the service role must never approve, reject or roll back a shared template`);
+  const serviceCalls = [...text.matchAll(/db\.rpc\(\s*["'`]([a-z_]+)["'`]/g), ...text.matchAll(/\brpc(?:<[^>]*>)?\(\s*(?:db|caller\.db)\s*,\s*["'`]([a-z_]+)["'`]/g)];
+  for (const match of serviceCalls) {
+    if (USER_SESSION_RPCS.has(match[1])) problems.push(`${rel}: the service role must never call ${match[1]}; it runs as the admin's own session`);
+  }
+  // A user-session call through a variable name we cannot see is refused (keeps rule 5 checkable).
+  if (/\brpc(?:<[^>]*>)?\(\s*(?!db\b|caller\.db\b|client\b|await userClient\(\))[a-zA-Z_.]+\s*,/.test(text) && rel.startsWith(path.join("src", "lib", "api", "modules"))) {
+    problems.push(`${rel}: call rpc() with db, client or await userClient() so the boundary check can see which session is used`);
+  }
+  // 6. API routes.
+  if (rel.startsWith(path.join("src", "app", "api")) && /route\.ts$/.test(rel)) {
+    if (!/from\s+["']@\/lib\/api\/core["']/.test(text) || !/\bhandle\(/.test(text)) problems.push(`${rel}: API routes must go through handle() from @/lib/api/core`);
   }
   if (/^\s*["']use server["']/.test(text)) {
     if (/export\s+(const|let|var|default|class)\s/.test(text)) problems.push(`${rel}: "use server" files may only export async functions`);

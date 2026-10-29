@@ -28,10 +28,11 @@
     "CF_ACCESS_TEAM_DOMAIN": "orange-resonance-3cfd.cloudflareaccess.com",
     // Audience tag of the Access application (public; it is inside every Access JWT).
     "CF_ACCESS_AUD": "a3f3f4c08ee4828a820661fbd1955ed9994243b6e6ec848864f1a53475207825",
+    // Every admin email must be here AND on the Access policy. Template reviewers are flagged in
+    // platform_admins.template_reviewer (set by an owner in the portal), not here.
     "ADMIN_ALLOWED_EMAILS": "admin@casevoya.ca",
-    // The licensed template reviewer(s) (Francis's immigration person, email TBD). Must also be in
-    // ADMIN_ALLOWED_EMAILS and on the Access policy. Empty = nobody can approve or reject yet.
-    "TEMPLATE_REVIEWER_EMAILS": ""
+    // Mutating /api/admin/* calls must carry this Origin (CSRF check).
+    "ADMIN_ORIGIN": "https://admin.casevoya.ca"
   },
   "observability": {
     "enabled": true,

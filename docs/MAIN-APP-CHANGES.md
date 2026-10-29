@@ -33,15 +33,16 @@ without a fresh step-up, and anyone without an active licence; approve keeps ref
    Prod today has **no** credential with `register_status = 'active'` (10 declared, 1 inactive), so
    the reviewer's licence must be checked first: `record_licence_check` by that firm's owner or a
    platform admin (cites register.college-ic.ca), or a CICC register import.
-4. Their email on the Access policy and on the Worker vars `ADMIN_ALLOWED_EMAILS` and
-   `TEMPLATE_REVIEWER_EMAILS` (see docs/TEMPLATES.md).
+4. Their email on the Access policy and the Worker var `ADMIN_ALLOWED_EMAILS`, and
+   `platform_admins.template_reviewer = true` (set by an owner on the Admins page).
 
 ## Optional schema changes (proposed, not applied)
 
-5. **Explicit reviewer flag:** `alter table public.platform_admins add column template_reviewer boolean not null default false;`
-   and have `app.platform_template_reviewer()` also require it. Until then, the flag is the portal's
-   `TEMPLATE_REVIEWER_EMAILS` plus the licence check in the database.
-6. **Structured citations:** the version body is `{title, summary, items}` with no sources. The portal
+5. **Explicit reviewer flag:** DONE in `20261029210000_adm_platform_admin_backend.sql`
+   (`platform_admins.template_reviewer`, required by `app.platform_template_reviewer()`, together with
+   roles owner/operator/viewer, invites, step-up and the bootstrap function).
+6. **Structured citations:** DONE in the same migration (`shared_template_version_sources`, set with
+   `set_shared_template_version_sources`; publishing needs at least one official source). Before it, the version body is `{title, summary, items}` with no sources. The portal
    stores the official source URLs inside `test_evidence` under an `Official sources:` header and
    checks them against `official_source_domains`. A `sources` array in the body (or a link table to
    `official_sources`), validated by `app.shared_template_body`, would make them first-class.
