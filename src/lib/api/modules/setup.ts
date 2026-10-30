@@ -38,6 +38,8 @@ export type SetupApi = {
   enrol(target: SetupTarget): Promise<TotpEnrolment>;
   /** Removes an UNVERIFIED factor (service role). */
   deleteFactor(caller: SetupContext, userId: string, factorId: string): Promise<void>;
+  /** Removes EVERY factor (verified or not, any type) of the user (service role). Returns how many were removed. */
+  deleteAllFactors(caller: SetupContext, userId: string): Promise<number>;
   /** Verifies a code for the factor; stores the aal2 session. Throws a SessionError (bad_code) when refused. */
   verify(target: SetupTarget, factorId: string, code: string): Promise<SessionStatus>;
   /** Bad setup passwords and codes for this email recorded in the audit log since `sinceIso`. */
@@ -151,7 +153,16 @@ export const setupEndpoints = [
       let user = caller.userId ? await setup.getUser(caller, caller.userId) : null;
       let created = false;
       if (user) {
-        if (!user.emailConfirmed) await setup.updateUser(caller, user.id, { confirmEmail: true });
+        // An unconfirmed account never proved ownership of this mailbox: neither confirm it nor accept its
+        // existing password. The new-password path (/setup/password) takes it over instead.
+        if (!user.emailConfirmed) {
+          ctx.log("admin setup existing account is unconfirmed; new password required", { requestId: ctx.requestId, userId: user.id });
+          throw new ApiError("validation_failed", "This account's email was never confirmed. Set a new password to continue.", {
+            issues: [{ path: "password", message: "This account's email was never confirmed. Set a new password to continue." }],
+            canReset: true,
+            unconfirmed: true,
+          });
+        }
         try {
           await setup.signIn(target(caller, user.id), ctx.input.password);
         } catch (error) {
@@ -200,9 +211,16 @@ export const setupEndpoints = [
       const setup = api(ctx);
       const user = caller.userId ? await setup.getUser(caller, caller.userId) : null;
       if (!user) throw new ApiError("conflict", "There is no account for this email yet. Create it instead.");
+      // An unconfirmed account may have been registered by someone else: remove every factor on it before
+      // confirming the email and setting the new password.
+      let removedFactors = 0;
+      if (!user.emailConfirmed) {
+        removedFactors = await setup.deleteAllFactors(caller, user.id);
+        ctx.audit.context = { setup_email: caller.email, was_unconfirmed: true, removed_factors: removedFactors };
+      }
       await setup.updateUser(caller, user.id, { password: ctx.input.password, fullName: ctx.input.fullName, confirmEmail: !user.emailConfirmed || undefined });
       await setup.signIn(target(caller, user.id), ctx.input.password);
-      ctx.log("admin setup password replaced", { requestId: ctx.requestId, userId: user.id });
+      ctx.log("admin setup password replaced", { requestId: ctx.requestId, userId: user.id, removedFactors });
       return { step: "authenticator", userId: user.id };
     },
   }),

@@ -63,6 +63,12 @@ function fakeSetup(w: World): SetupApi {
       w.calls.push(`deleteFactor:${factorId}`);
       if (w.user) w.user.factors = w.user.factors.filter((f) => f.id !== factorId);
     },
+    async deleteAllFactors(_c, userId) {
+      const removed = w.user?.factors.length ?? 0;
+      w.calls.push(`deleteAllFactors:${userId}:${removed}`);
+      if (w.user) w.user.factors = [];
+      return removed;
+    },
     async verify(_t, factorId, code) {
       w.calls.push(`verify:${factorId}`);
       if (code !== "123456") throw new SessionError("bad_code", "That code is not valid");
@@ -231,10 +237,20 @@ describe("POST /setup/account", () => {
     expect(json.data).toMatchObject({ created: false });
     expect(w.calls).toEqual([`getUser:${ME}`, "signIn", `updateUser:${ME}:fullName`]);
   });
-  it("confirms an unconfirmed email before signing in", async () => {
-    const w = world({ user: { id: ME, emailConfirmed: false, fullName: null, factors: [] } });
-    await call(deps(w), "POST", "/setup/account", { fullName: "Francis Alagbe", password: GOOD });
-    expect(w.calls[1]).toBe(`updateUser:${ME}:confirmEmail`);
+  it("refuses an existing unconfirmed account without confirming it or checking its password", async () => {
+    for (const pw of [GOOD, "wrong password!!"]) {
+      const w = world({ user: { id: ME, emailConfirmed: false, fullName: null, factors: [verified] } });
+      const d = deps(w);
+      const { status, json } = await call(d, "POST", "/setup/account", { fullName: "Francis Alagbe", password: pw });
+      expect(status).toBe(422);
+      expect(json.error?.code).toBe("validation_failed");
+      expect(json.error?.details).toMatchObject({ canReset: true, unconfirmed: true, issues: [{ path: "password" }] });
+      expect(w.calls).toEqual([`getUser:${ME}`]);
+      expect(w.calls.some((c) => c.startsWith("updateUser"))).toBe(false);
+      expect(w.session).toBeNull();
+      const audit = auditCalls(d.db)[0].args as { p_context?: Record<string, unknown> };
+      expect(audit.p_context?.setup_bad_attempt).toBeUndefined();
+    }
   });
   it("refuses a wrong password, offers the reset path and records a bad attempt without the password", async () => {
     const w = world({ user: { id: ME, emailConfirmed: true, fullName: null, factors: [] } });
@@ -276,6 +292,22 @@ describe("POST /setup/password", () => {
     expect(status).toBe(200);
     expect(w.calls).toEqual([`getUser:${ME}`, `updateUser:${ME}:fullName,password`, "signIn"]);
     expect(auditCalls(d.db)[0].args).toMatchObject({ p_action: "admin_portal.setup.password_reset", p_result: "success" });
+  });
+  it("keeps the factors of a confirmed account", async () => {
+    const w = world({ user: { id: ME, emailConfirmed: true, fullName: null, factors: [verified, pending] } });
+    const { status } = await call(deps(w), "POST", "/setup/password", { fullName: "Francis", password: "a brand new password", confirm: true });
+    expect(status).toBe(200);
+    expect(w.calls.some((c) => c.startsWith("delete"))).toBe(false);
+    expect(w.user?.factors).toEqual([verified, pending]);
+  });
+  it("on an unconfirmed account removes all factors, then confirms the email and sets the password", async () => {
+    const w = world({ user: { id: ME, emailConfirmed: false, fullName: null, factors: [verified, pending] } });
+    const d = deps(w);
+    const { status } = await call(d, "POST", "/setup/password", { fullName: "Francis", password: "a brand new password", confirm: true });
+    expect(status).toBe(200);
+    expect(w.calls).toEqual([`getUser:${ME}`, `deleteAllFactors:${ME}:2`, `updateUser:${ME}:confirmEmail,fullName,password`, "signIn"]);
+    expect(w.user?.factors).toEqual([]);
+    expect(auditCalls(d.db)[0].args).toMatchObject({ p_result: "success", p_context: { was_unconfirmed: true, removed_factors: 2 } });
   });
   it("needs explicit confirmation", async () => {
     const w = world({ user: { id: ME, emailConfirmed: true, fullName: null, factors: [] } });
