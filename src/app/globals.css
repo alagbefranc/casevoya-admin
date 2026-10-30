@@ -202,6 +202,7 @@ textarea.inp { min-height: 84px; resize: vertical; }
 .gl .ki { width: 34px; height: 34px; border-radius: 11px; background: var(--blue-soft); color: var(--blue); display: grid; place-items: center; flex: none; }
 .gl .bd { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .gl a { color: var(--ink); text-decoration: none; font-weight: 600; }
+.gl li > div > small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 .note { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--ink-2); background: var(--paper); border-radius: 12px; padding: 10px 12px; margin: 10px 14px 14px; }
 .note .ic { color: var(--blue); }
 .foot { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
@@ -357,3 +358,12 @@ pre.code, .codebox { background: var(--paper); border-radius: 12px; padding: 10p
   .gl li { flex-wrap: wrap; }
   .gl .bd { margin-left: 46px; justify-content: flex-start; width: calc(100% - 46px); }
 }
+.h3 { font: 600 13px var(--body); margin: 14px 0 6px; }
+.picker { border: 1px solid #e3e0dc; border-radius: 12px; max-height: 220px; overflow: auto; margin-top: 6px; background: #fff; }
+.picker button { display: flex; width: 100%; text-align: left; gap: 8px; align-items: center; border: 0; background: none; padding: 9px 11px; font: inherit; font-size: 13.5px; cursor: pointer; min-height: 40px; }
+.picker button:hover, .picker button:focus-visible { background: var(--paper); }
+.picker button small { color: var(--muted); margin-left: auto; }
+.picked { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.picked span { display: inline-flex; gap: 6px; align-items: center; background: var(--blue-tint); color: var(--blue); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 12.5px; }
+.picked span button { border: 0; background: none; color: inherit; cursor: pointer; padding: 2px; display: flex; }
+.countdown { font-weight: 600; font-variant-numeric: tabular-nums; }

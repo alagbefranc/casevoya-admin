@@ -21,3 +21,29 @@ SCENARIOS = [
     {"name": "57-state-offline", "url": "/firms", "steps": [("offline", None), ("wait", 300)]},
     {"name": "63-overview-complaints", "url": "/", "steps": [("click", "text=Complaints overdue")], "full": False},
 ]
+
+STALE = {**fx.ME, "session": {**fx.ME["session"], "stepUpFreshUntil": fx.unix(0.5)}}
+VIEWER = {**fx.ME, "role": "viewer", "capabilities": {**fx.ME["capabilities"], "operate": False, "manageAdmins": False, "reviewTemplates": False}}
+
+SCENARIOS += [
+    {"name": "11-grants", "url": "/grants"},
+    {"name": "12-grants-active", "url": "/grants?state=active"},
+    {"name": "13-grant-detail", "url": f"/grants/{fx.uid(302)}"},
+    {"name": "14-grant-request-form", "url": f"/grants?request={fx.uid(6)}", "full": False},
+    {"name": "15-health", "url": "/health"},
+    {"name": "16-health-drawer", "url": f"/health?event={fx.uid(801)}", "full": False},
+    {"name": "17-health-retry-dialog", "url": "/health", "steps": [("click", "table.dt button:has-text('Retry')"), ("fill", ("#cf-reason", "Mail provider fixed the rejected-recipient bug."))], "full": False},
+    {"name": "18-health-retry-stale-code", "url": "/health", "routes": {"/session": STALE}, "steps": [("click", "table.dt button:has-text('Retry')")], "full": False},
+    {"name": "19-health-empty", "url": "/health", "routes": {"/health": fx.HEALTH_OK, "/health/dead-letters": fx.page([])}},
+    {"name": "20-incidents", "url": "/incidents"},
+    {"name": "21-incidents-notices", "url": "/incidents?tab=notices"},
+    {"name": "22-notice-drawer", "url": f"/incidents?notice={fx.uid(602)}", "full": False},
+    {"name": "23-post-notice-form", "url": "/incidents?tab=notices&post=", "full": False},
+    {"name": "24-incidents-empty", "url": "/incidents", "routes": {"/incidents": {**fx.INCIDENTS, "items": [], "total": 0}}},
+    {"name": "25-releases", "url": "/releases"},
+    {"name": "26-releases-templates", "url": "/releases?tab=templates"},
+    {"name": "27-release-notes-stub", "url": "/releases?tab=notes"},
+    {"name": "28-version-diff", "url": f"/releases/templates/{fx.uid(704)}"},
+    {"name": "29-approve-dialog", "url": f"/releases/templates/{fx.uid(704)}", "steps": [("click", "button:has-text('Approve and publish')"), ("click", ".dialog .check input")], "full": False},
+    {"name": "60-viewer-health", "url": "/health", "routes": {"/session": VIEWER}},
+]
