@@ -35,6 +35,8 @@ const version = (status = "draft", author: string | null = OTHER) => ({
   sources: [{ official: true }],
   reviews: [],
 });
+const HASH = "ab".repeat(32);
+const submitted = { status: "draft", submitted_at: "2026-10-30T12:00:00Z", submitted_by: ME };
 const notice = { id: ID, status: "published", starts_at: null, ends_at: null, audience: "all", kind: "incident", title: "Slow uploads" };
 const goodCheck = {
   sourceUrl: "https://register.college-ic.ca/Public-Register-EN/Licensee/Profile.aspx?ID=1",
@@ -111,7 +113,9 @@ const CASES: Case[] = [
   { method: "GET", path: "/templates/versions/:id", url: `/templates/versions/${ID}`, bad: { url: "/templates/versions/1" }, deny: null, calls: "shared_template_diff", rpcs: { platform_template_version: version() } },
   { method: "POST", path: "/templates/drafts", url: "/templates/drafts", status: 201, body: goodDraft, bad: { url: "/templates/drafts", body: { ...goodDraft, stableKey: "Study Permit" } }, deny: "viewer", calls: "set_shared_template_version_sources", rpcs: { draft_shared_template_version: ID, platform_template_version: version("draft", ME) } },
   { method: "PATCH", path: "/templates/versions/:id", url: `/templates/versions/${ID}`, body: reviseBody, bad: { url: `/templates/versions/${ID}`, body: { ...goodDraft, items: [] } }, deny: "viewer", calls: "revise_shared_template_draft", rpcs: { platform_template_version: version("draft", ME) } },
-  { method: "POST", path: "/templates/versions/:id/approve", url: `/templates/versions/${ID}/approve`, body: { confirmCompared: true, code: "123456" }, bad: { url: `/templates/versions/${ID}/approve`, body: { confirmCompared: false } }, deny: "viewer", calls: "approve_shared_template_version", on: "user", session: "fresh", reviewer: true, rpcs: { platform_template_version: version("published") } },
+  { method: "POST", path: "/templates/versions/:id/submit", url: `/templates/versions/${ID}/submit`, body: {}, bad: { url: "/templates/versions/1/submit", body: {} }, deny: "viewer", calls: "submit_shared_template_version", rpcs: { platform_template_version: version("draft", ME), submit_shared_template_version: { id: ID, review_hash: HASH } } },
+  { method: "POST", path: "/templates/versions/:id/withdraw", url: `/templates/versions/${ID}/withdraw`, body: {}, bad: { url: "/templates/versions/1/withdraw", body: {} }, deny: "viewer", calls: "withdraw_shared_template_version", rpcs: { platform_template_version: version("draft", ME) }, tables: { shared_template_versions: [submitted] } },
+  { method: "POST", path: "/templates/versions/:id/approve", url: `/templates/versions/${ID}/approve`, body: { confirmCompared: true, reviewHash: HASH, code: "123456" }, bad: { url: `/templates/versions/${ID}/approve`, body: { confirmCompared: false, reviewHash: HASH } }, deny: "viewer", calls: "approve_shared_template_version", on: "user", session: "fresh", reviewer: true, rpcs: { platform_template_version: version("published") }, tables: { shared_template_versions: [submitted] } },
   { method: "POST", path: "/templates/versions/:id/reject", url: `/templates/versions/${ID}/reject`, body: { reason: "Missing the biometrics step" }, bad: { url: `/templates/versions/${ID}/reject`, body: { reason: "" } }, deny: "viewer", calls: "reject_shared_template_version", on: "user", session: "fresh", reviewer: true, rpcs: { platform_template_version: version("rejected") } },
   { method: "POST", path: "/templates/versions/:id/rollback", url: `/templates/versions/${ID}/rollback`, body: { reason: "Wrong fee amount" }, bad: { url: `/templates/versions/${ID}/rollback`, body: {} }, deny: "viewer", calls: "rollback_shared_template_version", on: "user", session: "fresh", reviewer: true, rpcs: { platform_template_version: version("withdrawn") } },
   // audit

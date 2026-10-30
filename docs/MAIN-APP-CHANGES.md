@@ -18,7 +18,9 @@ The template release screens (`/templates`) use the live functions from migratio
 | Draft | `draft_shared_template_version` | service role, author = the acting platform admin |
 | Revise | `revise_shared_template_draft` | service role (portal allows the author only) |
 | Diff | `shared_template_diff` | service role |
-| Approve (= publish) | `approve_shared_template_version` | the reviewer's own session, aal2 + TOTP step-up |
+| Submit / withdraw review | `submit_shared_template_version`, `withdraw_shared_template_version` (20261030140000) | service role, actor = the draft's author |
+| Review hash | `shared_template_review_hash` (20261030140000) | service role, read before the content shown |
+| Approve (= publish) | `approve_shared_template_version(uuid, text)` (hash-bound overload) | the reviewer's own session, aal2 + TOTP step-up |
 | Reject | `reject_shared_template_version` | the reviewer's own session, aal2 + TOTP step-up |
 
 `app.platform_template_reviewer()` keeps refusing the service role, non-platform-admins, a session

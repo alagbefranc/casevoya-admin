@@ -17,8 +17,10 @@ export type VersionDetail = {
   };
   sources: Source[];
   reviews: { decision: string; reviewer_label: string | null; reason: string | null; decided_at: string }[];
-  hints: { isAuthor: boolean; hasOfficialSource: boolean };
+  hints: { isAuthor: boolean; hasOfficialSource: boolean; inReview: boolean; submittedAt: string | null };
   diff: { version_id: string; version_number: number; status: string; before: Body | null; after: Body; changes: { field: "title" | "summary" | "items"; before: unknown; after: unknown }[] };
+  /** Hash of the content shown on this screen (read before it); approval sends it back. */
+  reviewHash: string | null;
 };
 
 type SourceRow = { url: string; title: string; retrievedOn: string; note: string };

@@ -9,9 +9,10 @@ import { ConfirmDialog } from "@/client/confirm";
 import { useApi } from "@/client/hooks";
 import { day, when, words } from "@/client/format";
 import { DraftForm, type Body, type VersionDetail } from "@/client/releases";
+import { isReviewChanged, reviewActions } from "@/client/template-review";
 import { Alert, Badge, Empty, PageHeader, Panel, Section, Skeleton, SkeletonRows, Status, Timeline } from "@/components/ui";
 
-type Decision = "approve" | "reject" | "rollback";
+type Decision = "approve" | "reject" | "rollback" | "submit" | "withdraw";
 
 /** Items diff with text labels (spec 2.7 JsonDiff). */
 function Side({ label, body, other, mark }: { label: string; body: Body | null; other: Body | null; mark: "rem" | "add" }) {
@@ -42,32 +43,53 @@ export default function VersionPage() {
   const [action, setAction] = useState<Decision | null>(null);
   const [revise, setRevise] = useState(false);
   const [compared, setCompared] = useState(false);
+  // The review hash of the content first shown here. Approval sends this one, so it binds to what was on screen;
+  // if a refresh brings different content, the reviewer has to acknowledge it before approving.
+  const [reviewed, setReviewed] = useState<{ id: string; hash: string } | null>(null);
   const d = detail.data;
   const v = d?.version;
+  const reviewedHash = v && reviewed?.id === v.id ? reviewed.hash : null;
+  if (v && d?.reviewHash && reviewedHash === null) setReviewed({ id: v.id, hash: d.reviewHash });
+  const changedSinceOpened = Boolean(d?.reviewHash && reviewedHash && d.reviewHash !== reviewedHash);
   const prev = d?.diff.before ? `v${(v?.version_number ?? 1) - 1}` : null;
   const reviewer = me.capabilities.reviewTemplates;
-  const canDecide = Boolean(v && reviewer && v.status === "draft" && !d?.hints.isAuthor);
+  const acts = d && v
+    ? reviewActions({ status: v.status, isAuthor: d.hints.isAuthor, inReview: Boolean(d.hints.inReview), hasOfficialSource: d.hints.hasOfficialSource, reviewHash: reviewedHash }, me.capabilities)
+    : null;
   const canRollback = Boolean(v && reviewer && v.status === "published");
-  const canRevise = Boolean(v && d?.hints.isAuthor && v.status === "draft" && me.capabilities.operate);
+  const approveBlocked = acts?.approveBlocked ?? (changedSinceOpened ? "The content changed since you opened it" : null);
+  const stageLabel = acts?.stage === "in_review" ? "In review" : acts?.stage === "draft" ? "Draft (not submitted)" : v ? words(v.status) : "";
 
   return (
     <>
       <PageHeader
         crumb={<><Link href="/releases?tab=templates">Releases</Link> › {v ? `v${v.version_number}` : "…"}</>}
         title={v ? <>{v.body.title} · v{v.version_number}</> : <Skeleton h={34} w={360} />}
-        lede={v ? <><span className="mono">{v.stable_key}</span> · {v.status === "draft" ? "Draft" : words(v.status)}{v.author_name ? ` by ${v.author_name}` : ""} · effective {day(v.effective_on)} <Status value={v.status === "draft" ? "awaiting_review" : v.status} label={v.status === "draft" ? "Awaiting review" : undefined} /></> : null}
+        lede={v ? <><span className="mono">{v.stable_key}</span> · {stageLabel}{v.author_name ? ` by ${v.author_name}` : ""} · effective {day(v.effective_on)} <Status value={acts?.stage === "in_review" ? "awaiting_review" : v.status} label={acts?.stage === "in_review" ? "Awaiting review" : acts?.stage === "draft" ? "Not submitted" : undefined} /></> : null}
         actions={v ? (
           <>
-            {canRevise ? <button type="button" className="btn" onClick={() => setRevise(true)}>Revise</button> : null}
-            {canDecide ? <button type="button" className="btn" onClick={() => setAction("reject")}>Reject</button> : null}
+            {acts?.canRevise ? <button type="button" className="btn" onClick={() => setRevise(true)}>Revise</button> : null}
+            {acts?.canWithdraw ? <button type="button" className="btn" onClick={() => setAction("withdraw")}>Withdraw from review</button> : null}
+            {acts?.canSubmit ? <button type="button" className="btn primary" disabled={Boolean(acts.submitBlocked)} title={acts.submitBlocked ?? undefined} onClick={() => setAction("submit")}>Submit for review</button> : null}
+            {acts?.canReject ? <button type="button" className="btn" onClick={() => setAction("reject")}>Reject</button> : null}
             {canRollback ? <button type="button" className="btn danger" onClick={() => setAction("rollback")}>Roll back</button> : null}
-            {canDecide ? <button type="button" className="btn primary" disabled={!d?.hints.hasOfficialSource} title={d?.hints.hasOfficialSource ? undefined : "Add at least one official source"} onClick={() => setAction("approve")}><CheckCircle2 className="ic" aria-hidden />Approve and publish</button> : null}
+            {acts?.canApprove ? <button type="button" className="btn primary" disabled={Boolean(approveBlocked)} title={approveBlocked ?? undefined} onClick={() => setAction("approve")}><CheckCircle2 className="ic" aria-hidden />Approve and publish</button> : null}
           </>
         ) : null}
       />
       {sourcesFailed !== null ? <Alert tone="warn" title="The draft was saved, but its sources were not.">{sourcesFailed || "Revise the draft to add them again."}</Alert> : null}
-      {d && v?.status === "draft" && !d.hints.hasOfficialSource ? <Alert tone="warn" title="This draft has no official source.">Publishing needs at least one source on the official-domain list.{canDecide ? " Approve stays disabled until the author adds one." : ""}</Alert> : null}
-      {d && v?.status === "draft" && d.hints.isAuthor && reviewer ? <Alert tone="info" title="You wrote this draft.">Another reviewer has to approve it.</Alert> : null}
+      {changedSinceOpened && acts?.canApprove ? (
+        <Alert tone="warn" title="This draft changed since you opened it." actions={<button type="button" className="btn sm" onClick={() => v && d?.reviewHash && setReviewed({ id: v.id, hash: d.reviewHash })}>I reviewed the current content</button>}>
+          The page now shows the current content. Review it again before approving.
+        </Alert>
+      ) : null}
+      {d && v?.status === "draft" && !d.hints.hasOfficialSource ? <Alert tone="warn" title="This draft has no official source.">Publishing needs at least one source on the official-domain list.{acts?.canApprove || acts?.canReject ? " Approve stays disabled until the author adds one." : acts?.canSubmit ? " Add one before submitting it for review." : ""}</Alert> : null}
+      {d && v?.status === "draft" && d.hints.isAuthor ? (
+        d.hints.inReview
+          ? <Alert tone="info" title="Submitted for review.">The content and sources are locked{d.hints.submittedAt ? ` since ${when(d.hints.submittedAt)}` : ""}. Another reviewer has to approve it. Withdraw it from review to revise it.</Alert>
+          : <Alert tone="info" title="You wrote this draft.">Submit it for review when it is ready. Another reviewer has to approve it.</Alert>
+      ) : null}
+      {d && v?.status === "draft" && !d.hints.isAuthor && !d.hints.inReview && reviewer ? <Alert tone="info" title="Not submitted for review yet.">The author is still working on this draft. Approve appears once they submit it.</Alert> : null}
       <Section loaded={detail} skeleton={<SkeletonRows n={8} />} notFound={<Empty title="This version does not exist."><Link href="/releases?tab=templates">Back to templates</Link></Empty>}>
         {({ version, sources, reviews, diff }) => (
           <>
@@ -113,12 +135,32 @@ export default function VersionPage() {
       </Section>
 
       {revise && d ? <DraftForm revise={d} onClose={() => setRevise(false)} /> : null}
-      {action === "approve" && v ? (
+      {action === "approve" && v && reviewedHash ? (
         <ConfirmDialog title={`Approve and publish v${v.version_number}?`} confirmLabel="Approve and publish" stepUp disabled={!compared} successToast="Published to adopting firms"
           extra={<label className="check"><input type="checkbox" checked={compared} onChange={(e) => setCompared(e.target.checked)} />I compared this draft with the published version and its sources</label>}
-          onConfirm={({ code }) => api.post(`/templates/versions/${v.id}/approve`, { confirmCompared: true, ...(code ? { code } : {}) })}
+          onConfirm={async ({ code }) => {
+            try {
+              return await api.post(`/templates/versions/${v.id}/approve`, { confirmCompared: true, reviewHash: reviewedHash, ...(code ? { code } : {}) });
+            } catch (e) {
+              // Show the current content behind the dialog; the error says to review it again.
+              if (isReviewChanged(e)) void detail.reload();
+              throw e;
+            }
+          }}
           onClose={() => { setAction(null); setCompared(false); }}>
           <p style={{ margin: 0 }}>{prev ? `Publishing replaces ${prev} for every adopting firm; they are notified in Casevoya.` : "This becomes the first published version. Firms that adopt it are notified in Casevoya."}</p>
+        </ConfirmDialog>
+      ) : null}
+      {action === "submit" && v ? (
+        <ConfirmDialog title={`Submit v${v.version_number} for review?`} confirmLabel="Submit for review" successToast="Submitted for review"
+          onConfirm={() => api.post(`/templates/versions/${v.id}/submit`, {})} onClose={() => setAction(null)}>
+          <p style={{ margin: 0 }}>The content and sources are locked until a reviewer approves or rejects it, or you withdraw it from review.</p>
+        </ConfirmDialog>
+      ) : null}
+      {action === "withdraw" && v ? (
+        <ConfirmDialog title={`Withdraw v${v.version_number} from review?`} confirmLabel="Withdraw from review" successToast="Withdrawn from review"
+          onConfirm={() => api.post(`/templates/versions/${v.id}/withdraw`, {})} onClose={() => setAction(null)}>
+          <p style={{ margin: 0 }}>You can revise it again. It cannot be approved until you submit it again.</p>
         </ConfirmDialog>
       ) : null}
       {action === "reject" && v ? (
