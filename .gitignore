@@ -55,3 +55,4 @@ supabase/.branches/
 
 # Service bundles (services/*/dist, built by each service's `pnpm bundle`)
 /services/*/dist/
+__pycache__/
