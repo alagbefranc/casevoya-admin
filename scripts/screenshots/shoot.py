@@ -67,7 +67,7 @@ def main():
             for w in widths:
                 ctx = browser.new_context(viewport={"width": w, "height": 900 if w > 500 else 844}, device_scale_factor=1, timezone_id="America/Toronto", locale="en-CA")
                 page = ctx.new_page()
-                routes = {**fx.base_routes(), **fx.ops_routes()}
+                routes = {**fx.base_routes(), **fx.ops_routes(), **fx.records_routes(), **fx.admin_routes()}
                 routes.update(sc.get("routes", {}))
                 page.route("**/api/admin/**", make_handler(routes, sc.get("errors", {})))
                 if sc.get("offline"):
@@ -84,6 +84,8 @@ def main():
                         page.click(arg)
                     elif kind == "fill":
                         page.fill(arg[0], arg[1])
+                    elif kind == "select":
+                        page.select_option(arg[0], arg[1])
                     elif kind == "wait":
                         page.wait_for_timeout(arg)
                     elif kind == "offline":

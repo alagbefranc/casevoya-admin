@@ -47,3 +47,37 @@ SCENARIOS += [
     {"name": "29-approve-dialog", "url": f"/releases/templates/{fx.uid(704)}", "steps": [("click", "button:has-text('Approve and publish')"), ("click", ".dialog .check input")], "full": False},
     {"name": "60-viewer-health", "url": "/health", "routes": {"/session": VIEWER}},
 ]
+
+SCENARIOS += [
+    {"name": "04-subscriptions", "url": "/subscriptions"},
+    {"name": "05-usage", "url": "/usage"},
+    {"name": "06-verification", "url": "/verification?kind=all"},
+    {"name": "07-verification-cicc", "url": "/verification?tab=cicc"},
+    {"name": "08-credential", "url": f"/verification/credentials/{fx.uid(501)}"},
+    {"name": "09-credential-check-form", "url": f"/verification/credentials/{fx.uid(501)}", "steps": [("click", "button:has-text('Record manual check')"), ("select", ("#c-reg", "active")), ("wait", 200)], "full": False},
+    {"name": "10-cicc-upload", "url": "/verification?tab=cicc&upload=1", "full": False},
+    {"name": "61-subscriptions-empty", "url": "/subscriptions", "routes": {"/subscriptions/exceptions": {**fx.SUBSCRIPTIONS, "items": [], "total": 0, "by_reason": {}}}},
+]
+
+OPERATOR = {**fx.ME, "role": "operator", "capabilities": {**fx.ME["capabilities"], "manageAdmins": False}}
+
+SCENARIOS += [
+    {"name": "30-config-settings", "url": "/config"},
+    {"name": "31-config-change-drawer", "url": "/config?edit=trial.duration", "steps": [("fill", ("#s-count", "21")), ("fill", ("#s-reason", "Pilot firms asked for three weeks to finish onboarding."))], "full": False},
+    {"name": "32-config-switches", "url": "/config?tab=switches"},
+    {"name": "33-config-flags-stub", "url": "/config?tab=flags"},
+    {"name": "34-admins", "url": "/config/admins"},
+    {"name": "35-admin-invite-form", "url": "/config/admins?invite=1", "steps": [("fill", ("#i-email", "daniel.r@example.test")), ("fill", ("#i-note", "Support rotation"))], "full": False},
+    {"name": "36-admin-invite-next-steps", "url": "/config/admins?invite=1", "steps": [("fill", ("#i-email", "daniel.r@example.test")), ("click", "button:has-text('Create invite')"), ("wait", 400)], "full": False},
+    {"name": "37-admin-remove-dialog", "url": "/config/admins", "steps": [("click", "table.dt button:has-text('Remove') >> nth=2"), ("fill", ("#cf-reason", "Moved to another team."))], "full": False},
+    {"name": "38-admins-operator-denied", "url": "/config/admins", "routes": {"/session": OPERATOR}},
+    {"name": "39-audit", "url": "/audit"},
+    {"name": "39b-audit-expanded", "url": "/audit", "steps": [("click", "button[aria-label='Show details'] >> nth=0")]},
+    {"name": "40-privacy", "url": "/privacy"},
+    {"name": "41-breach-stub", "url": "/privacy?tab=breaches"},
+    {"name": "42-sample-mode", "url": "/sample-mode"},
+    {"name": "43-migration", "url": "/migration"},
+    {"name": "43b-migration-expanded", "url": "/migration", "steps": [("click", "button[aria-label='Show counts'] >> nth=0")]},
+    {"name": "64-privacy-overdue-empty", "url": "/privacy?state=overdue", "routes": {"/privacy/requests": {**fx.PRIVACY, "items": [], "total": 0}}},
+    {"name": "65-sample-empty", "url": "/sample-mode", "routes": {"/sample-mode": fx.SAMPLE_EMPTY}},
+]

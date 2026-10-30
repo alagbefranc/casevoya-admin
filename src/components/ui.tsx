@@ -40,7 +40,7 @@ const TONES: Record<string, Tone> = {
   adverse: "bad", needs_review: "warn", never_checked: "neutral", overdue: "bad", due: "warn", ok: "ok",
   not_entitled: "bad", inactive: "bad", suspended: "bad", revoked: "bad",
   // migration
-  staged: "info", checked: "info", committing: "info", committed: "ok", discarded: "neutral", stuck: "bad",
+  staged: "info", checked: "info", complete: "ok", committing: "info", committed: "ok", discarded: "neutral", stuck: "bad",
   // audit
   success: "ok", denied: "warn", failure: "bad",
   // invoices
