@@ -308,13 +308,15 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
   };
   // Attempt reservation (step 5a): the outcome is taken from the session calls that carry the code or password.
   let attemptId: string | null = null;
-  let codeAccepted = false;
   let codeRejected = false;
-  const settleAttempt = async (ok: boolean) => {
+  const settleAttempt = async () => {
     if (!attemptId || !deps.attempts) return;
     const id = attemptId;
     attemptId = null;
-    const succeeded = codeRejected ? false : codeAccepted ? true : ok;
+    // Only a code or password that Supabase rejected counts as a bad attempt; a request that failed for
+    // another reason (not found, conflict, typo in a confirm field) before the code was tried does not.
+    // A success never offsets failures (the database counts unsuccessful attempts only).
+    const succeeded = !codeRejected;
     try {
       await deps.attempts.resolve(caller as SessionCaller, id, succeeded);
     } catch (error) {
@@ -323,7 +325,7 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
     }
   };
   const fail = async (error: ApiError) => {
-    await settleAttempt(false);
+    await settleAttempt();
     if (error.internal) log("admin api upstream error", { requestId, endpoint: endpointName, code: error.code, detail: redact(error.internal) });
     const result = auditResultFor(error);
     if (result === "denied") log("admin api request refused", { requestId, endpoint: endpointName, code: error.code, role: caller.role ?? null });
@@ -427,10 +429,7 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
     // calls that carry the code record whether it was accepted (the reserved attempt's outcome).
     const track = <T>(call: Promise<T>): Promise<T> =>
       call.then(
-        (value) => {
-          codeAccepted = true;
-          return value;
-        },
+        (value) => value,
         (error: unknown) => {
           if (isBadSecret(error)) codeRejected = true;
           throw error;
@@ -464,7 +463,7 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
       userClient,
     };
     const data = await endpoint.handler(ctx);
-    await settleAttempt(true);
+    await settleAttempt();
     await finishAudit("success");
     return json({ data: data ?? null, requestId }, endpoint.status ?? 200, requestId);
   } catch (error) {

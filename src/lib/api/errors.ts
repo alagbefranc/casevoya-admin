@@ -90,7 +90,7 @@ function mapDbError(code: string, raw: string): ApiError {
     if (/step-up|sign in with MFA/i.test(raw)) return new ApiError("step_up_required", STEP_UP_MESSAGE);
     return new ApiError("forbidden", isPlainDbMessage(raw) ? raw.trim() : "Casevoya's database refused this action for your account.");
   }
-  if (code === "22023") return new ApiError("validation_failed", raw || "The database refused a value in this request.");
+  if (code === "22023") return new ApiError("validation_failed", isPlainDbMessage(raw) ? raw.trim() : "The database refused a value in this request. Check the form and try again.");
   // object_not_in_prerequisite_state: the row is not in a state that allows this (e.g. setup already done).
   if (code === "55000") return new ApiError("conflict", isPlainDbMessage(raw) ? raw.trim() : REFUSED_MESSAGE);
   // A plain RAISE EXCEPTION without a specific code: refused, but the text is not vetted for the browser.
