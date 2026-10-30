@@ -112,6 +112,8 @@ export const sessionEndpoints = [
     input: z.object({ confirm: z.literal(true, { message: "Confirm you accept the platform admin role" }) }),
     session: "required",
     auditRequired: true,
+    // Names the invite from the gate on every entry, including the "started" one.
+    auditObjectId: (caller) => ("invite" in caller ? caller.invite.id : null),
     audit: { action: "admins.invite_accepted", table: "public.platform_admin_invites" },
     async handler({ caller, userClient, audit }) {
       if (caller.role !== null) throw new ApiError("conflict", "You are already a platform admin");

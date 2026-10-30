@@ -96,14 +96,21 @@ describe("POST /templates/versions/:id/approve", () => {
     expect(outcomeAudits(d.db)[0].args).toMatchObject({ p_result: "failure" });
   });
 
-  it("maps other database refusals by code with a generic message, logging the raw one server-side", async () => {
+  it("shows a plain business-rule refusal, logging the raw one server-side", async () => {
     const d = approveDeps({ userRpcs: { approve_shared_template_version: { error: { code: "42501", message: "the author cannot approve their own version" } } } });
     const res = await handle(approve(), ENDPOINTS, d);
     expect(res.status).toBe(403);
     const err = (await body(res)).error!;
     expect(err.code).toBe("forbidden");
-    expect(err.message).not.toMatch(/author/);
+    expect(err.message).toBe("the author cannot approve their own version");
     expect(JSON.stringify(d.logs)).toMatch(/the author cannot approve their own version/);
+  });
+
+  it("keeps refusals that look like internal detail generic", async () => {
+    const d = approveDeps({ userRpcs: { approve_shared_template_version: { error: { code: "42501", message: "permission denied for table shared_template_versions" } } } });
+    const res = await handle(approve(), ENDPOINTS, d);
+    expect(res.status).toBe(403);
+    expect((await body(res)).error!.message).not.toMatch(/shared_template_versions|permission denied/);
   });
 
   it("still needs the reviewer flag", async () => {

@@ -140,16 +140,40 @@ async function readStoredTokens(): Promise<{ a: string; r: string; x: number | n
   }
 }
 
-/** The stored tokens, or null when there are none or the session is past its absolute lifetime. */
-async function readTokens(): Promise<{ a: string; r: string; x: number } | null> {
+/**
+ * The stored tokens, or null when there are none or the session is past its absolute lifetime. A session dropped
+ * for its absolute lifetime is also ended with Supabase and its cookie cleared (best effort).
+ */
+async function readTokens(caller: Caller): Promise<{ a: string; r: string; x: number } | null> {
   const tokens = await readStoredTokens();
-  if (!tokens || tokens.x === null || absoluteExpired(tokens.x, null, nowSeconds())) return null;
+  if (!tokens) return null;
+  if (tokens.x === null || absoluteExpired(tokens.x, null, nowSeconds())) {
+    await endDroppedSession(caller, tokens);
+    return null;
+  }
   return { a: tokens.a, r: tokens.r, x: tokens.x };
+}
+
+/** Best effort: clears the cookie and revokes the Supabase session of tokens past their absolute lifetime. */
+async function endDroppedSession(caller: Caller, tokens: { a: string; r: string }): Promise<void> {
+  try {
+    await clearSession();
+  } catch (error) {
+    console.error("admin session: clearing an ended session cookie failed", { error: redact(error instanceof Error ? error.message : String(error)) });
+  }
+  if (!tokens.r || !caller.env.supabasePublishableKey) return;
+  try {
+    const client = userClient(caller);
+    const { error } = await client.auth.setSession({ access_token: tokens.a, refresh_token: tokens.r });
+    if (!error) await client.auth.signOut({ scope: "local" });
+  } catch (error) {
+    console.error("admin session: revoking an ended session failed", { error: redact(error instanceof Error ? error.message : String(error)) });
+  }
 }
 
 /** What the stored cookie claims (not re-validated with Supabase; used to decide what to show and to pre-check). */
 export async function sessionStatus(caller: Caller): Promise<SessionStatus> {
-  const tokens = await readTokens();
+  const tokens = await readTokens(caller);
   return describeToken(tokens?.a, caller.userId);
 }
 
@@ -192,7 +216,7 @@ export async function signIn(caller: Caller, password: string, code: string): Pr
  * is within its absolute lifetime (cookie end and the verified token's password sign-in time).
  */
 async function restore(caller: Caller): Promise<{ client: SupabaseClient; session: Session; endsAt: number }> {
-  const tokens = await readTokens();
+  const tokens = await readTokens(caller);
   if (!tokens) {
     await clearSession();
     throw new SessionError("no_session", "Sign in with your password and authenticator code first.");
@@ -265,7 +289,7 @@ export async function signInWithPasswordOnly(caller: Caller, password: string): 
 
 /** The stored session for the Access user, re-validated with Supabase, or null when there is none or it ended. */
 export async function setupSessionStatus(caller: Caller): Promise<SessionStatus | null> {
-  if (!(await readTokens())) return null;
+  if (!(await readTokens(caller))) return null;
   try {
     const { session, endsAt } = await restore(caller);
     await store(session, endsAt);

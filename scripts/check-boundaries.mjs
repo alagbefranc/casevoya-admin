@@ -68,9 +68,9 @@ for (const file of walk(SRC)) {
   if (/SUPABASE_SECRET_KEY/.test(text) && rel !== path.join("src", "lib", "env.ts")) problems.push(`${rel}: reads SUPABASE_SECRET_KEY outside src/lib/env.ts`);
   if (/^\s*["']use client["']/.test(text) && /@\/lib\/(guard|supabase|env|reviewer|session|data|api)/.test(text)) problems.push(`${rel}: a client component imports server-only admin code`);
   for (const match of text.matchAll(/\.from\(\s*["'`]([a-z_]+)["'`]\s*\)/g)) {
-    // The Setup lockout (src/lib/setup.ts) and the code-attempt lockout (src/lib/lockout.ts) count the portal's own
-    // failed admin_portal.* rows; no other file reads audit_log directly.
-    if (match[1] === "audit_log" && (rel === path.join("src", "lib", "setup.ts") || rel === path.join("src", "lib", "lockout.ts"))) continue;
+    // The Setup lockout (src/lib/setup.ts) counts the portal's own failed admin_portal.setup.* rows; no other file
+    // reads audit_log directly (the code-attempt lockout uses platform_admin_reserve_attempt).
+    if (match[1] === "audit_log" && rel === path.join("src", "lib", "setup.ts")) continue;
     if (!READABLE.has(match[1])) problems.push(`${rel}: reads table ${match[1]}, which is not on the platform-operations allow list`);
   }
   if (/\.(insert|update|upsert|delete)\(/.test(text)) problems.push(`${rel}: writes a table directly; use a named database function (rpc) instead`);

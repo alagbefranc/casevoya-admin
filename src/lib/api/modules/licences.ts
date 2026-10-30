@@ -159,7 +159,9 @@ export const licenceEndpoints = [
           await rpc(db, "import_cicc_register", { p_import_id: importId, p_rows: parsed.rows.slice(i, i + CICC_CHUNK) });
         } catch (error) {
           if (error instanceof ApiError) {
-            throw new ApiError(error.code, `Rows ${i + 1}-${Math.min(i + CICC_CHUNK, parsed.rows.length)} failed: ${error.message}. Import ${importId} stays open and unused.`, { importId });
+            const out = new ApiError(error.code, `Rows ${i + 1}-${Math.min(i + CICC_CHUNK, parsed.rows.length)} failed: ${error.message}. Import ${importId} stays open and unused.`, { importId });
+            out.internal = error.internal;
+            throw out;
           }
           throw error;
         }

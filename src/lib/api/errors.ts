@@ -55,10 +55,27 @@ export function zodDetails(error: ZodError): { issues: FieldIssue[] } {
 /** A Postgres / PostgREST error from supabase-js. */
 export type DbError = { code?: string | null; message: string; details?: string | null; hint?: string | null };
 
+export const REFUSED_MESSAGE = "Casevoya refused this change. Check the details and try again.";
+
 /**
- * Maps a database refusal to the API error codes. Only 22023 messages (raised by our own functions as
- * user-facing validation text) reach the browser; every other code gets a generic message. The raw message is
- * kept on `internal` for the server log.
+ * Whether a database message is a short, plain sentence (a business rule our functions raise) that may be shown
+ * to the admin. Anything that looks like internal detail (identifiers, SQL terms, schema names, quotes) is not.
+ */
+export function isPlainDbMessage(raw: string): boolean {
+  const text = raw.trim();
+  if (!text || text.length > 200) return false;
+  // Letters, digits, spaces and light punctuation only: no quotes, underscores, brackets of SQL, newlines.
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ,.;:'’()\-/]*$/.test(text)) return false;
+  if (/\b(relation|column|function|table|schema|constraint|violates|syntax|operator|trigger|sql|select|insert|update|delete)\b|permission denied for/i.test(text)) return false;
+  if (/\b(public|app|auth|private|extensions|storage|pg_catalog|information_schema)\.[a-z]/i.test(text)) return false;
+  return true;
+}
+
+/**
+ * Maps a database refusal to the API error codes. 22023 messages (raised by our own functions as user-facing
+ * validation text) reach the browser; short plain business-rule messages on 42501 and 55000 do too (see
+ * isPlainDbMessage); every other code gets a generic message. The raw message is kept on `internal` for the
+ * server log.
  */
 export function fromDbError(error: DbError): ApiError {
   const code = error.code ?? "";
@@ -71,9 +88,13 @@ export function fromDbError(error: DbError): ApiError {
 function mapDbError(code: string, raw: string): ApiError {
   if (code === "42501") {
     if (/step-up|sign in with MFA/i.test(raw)) return new ApiError("step_up_required", STEP_UP_MESSAGE);
-    return new ApiError("forbidden", "Casevoya's database refused this action for your account.");
+    return new ApiError("forbidden", isPlainDbMessage(raw) ? raw.trim() : "Casevoya's database refused this action for your account.");
   }
   if (code === "22023") return new ApiError("validation_failed", raw || "The database refused a value in this request.");
+  // object_not_in_prerequisite_state: the row is not in a state that allows this (e.g. setup already done).
+  if (code === "55000") return new ApiError("conflict", isPlainDbMessage(raw) ? raw.trim() : REFUSED_MESSAGE);
+  // A plain RAISE EXCEPTION without a specific code: refused, but the text is not vetted for the browser.
+  if (code === "P0001") return new ApiError("conflict", REFUSED_MESSAGE);
   if (["22P02", "23514", "22007", "22008", "23502", "22001", "22003"].includes(code)) {
     return new ApiError("validation_failed", "The database refused a value in this request. Check the form and try again.");
   }

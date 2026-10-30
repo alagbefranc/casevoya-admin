@@ -6,7 +6,7 @@ import { useAdmin } from "@/client/app";
 import { useFirmFilter } from "@/client/firm-filter";
 import { refreshAll, useApi, useQueryState } from "@/client/hooks";
 import { dash, short, when } from "@/client/format";
-import { ACTION_PREFIX, AUDIT_FAMILIES, localToIso, rangeError } from "@/client/records";
+import { ACTION_PREFIX, AUDIT_FAMILIES, auditResultLabel, localToIso, rangeError } from "@/client/records";
 import { Badge, Empty, ErrorAlert, FilterBar, FilteredEmpty, NotBuilt, PageHeader, Panel, SearchField, Section, SelectField, SkeletonRows } from "@/components/ui";
 
 type Cursor = { before_at: string; before_id: string };
@@ -15,7 +15,6 @@ type AuditPage = { items: Event[]; limit: number; next_cursor: Cursor | null };
 type AdminLite = { admins: { user_id: string; email: string }[] };
 const LIMIT = 50;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const RESULT_TONE = { success: "ok", denied: "warn", failure: "bad" } as const;
 
 export default function AuditLogPage() {
   const { me } = useAdmin();
@@ -111,7 +110,7 @@ function Results({ path, params, filtered, onClear }: { path: string; params: Re
                           ) : null}</td>
                           <td data-l="Time" className="first">{when(e.occurred_at)}</td>
                           <td data-l="Action"><span className="mono">{e.action}</span></td>
-                          <td data-l="Result"><Badge tone={RESULT_TONE[e.result] ?? "neutral"}>{e.result}</Badge></td>
+                          <td data-l="Result"><Badge tone={auditResultLabel(e).tone}>{auditResultLabel(e).label}</Badge></td>
                           <td data-l="Actor">{e.actor_email ?? e.actor_type ?? dash}</td>
                           <td data-l="Firm">{e.firm_name ?? dash}</td>
                           <td data-l="Object"><span className="mono">{e.object_table ? `${e.object_table}${e.object_id ? ` · ${short(e.object_id)}` : ""}` : dash}</span></td>

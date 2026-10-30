@@ -96,35 +96,94 @@ describe("L1: authenticator code attempt lockout", () => {
     const d = deps({ session: "fresh", badAttempts: CODE_MAX_BAD_ATTEMPTS });
     const res = await handle(stepUp(), ENDPOINTS, d);
     expect(res.status).toBe(429);
-    expect((await body(res)).error?.code).toBe("rate_limited");
+    const err = (await body(res)).error;
+    expect(err?.code).toBe("rate_limited");
+    expect(err?.details).toMatchObject({ retryAfterMinutes: CODE_LOCKOUT_MINUTES, retryAfterSeconds: CODE_LOCKOUT_MINUTES * 60 });
     expect(d.sessionCalls).toEqual([]);
     expect(auditCalls(d.db)[0].args).toMatchObject({ p_result: "denied" });
-    expect(d.attemptQueries).toEqual([new Date((NOW - CODE_LOCKOUT_MINUTES * 60) * 1000).toISOString()]);
+    expect(d.attemptCalls).toEqual(["reserve:mfa"]);
+    expect(d.attemptRows).toEqual([]);
   });
 
-  it("applies to sign-in and to codes sent with step-up actions too", async () => {
+  it("applies to sign-in (keyed by the Access user, before the password is tried) and to codes sent with step-up actions", async () => {
     const signIn = deps({ badAttempts: CODE_MAX_BAD_ATTEMPTS });
     expect((await handle(req("POST", "/session/sign-in", { password: "pw", code: "123456" }), ENDPOINTS, signIn)).status).toBe(429);
     expect(signIn.sessionCalls).toEqual([]);
+    expect(signIn.attemptCalls).toEqual(["reserve:password"]);
     const retry = deps({ session: "stale", badAttempts: CODE_MAX_BAD_ATTEMPTS, db: fakeDb({ platform_outbox_event: { id: ID, organization_id: ORG, status: "dead_lettered" } }) });
     expect((await handle(req("POST", `/health/dead-letters/${ID}/retry`, { reason: "Provider recovered", code: "123456" }), ENDPOINTS, retry)).status).toBe(429);
     expect(retry.userDb.calls).toEqual([]);
+    expect(retry.sessionCalls).toEqual([]);
   });
 
-  it("allows the code below the limit and does not count requests without a code", async () => {
+  it("allows the code below the limit, resolves it as succeeded, and does not reserve without a code", async () => {
     const d = deps({ session: "fresh", badAttempts: CODE_MAX_BAD_ATTEMPTS - 1 });
     expect((await handle(stepUp(), ENDPOINTS, d)).status).toBe(200);
     expect(d.sessionCalls).toEqual(["stepUp"]);
+    expect(d.attemptCalls).toEqual(["reserve:mfa", "resolve:true"]);
+    expect(d.attemptRows.map((r) => r.succeeded)).toEqual([true]);
     const noCode = deps({ session: "fresh", badAttempts: 99, db: fakeDb({ platform_outbox_event: { id: ID, organization_id: ORG, status: "dead_lettered" } }) });
     expect((await handle(req("POST", `/health/dead-letters/${ID}/retry`, { reason: "Provider recovered" }), ENDPOINTS, noCode)).status).toBe(200);
-    expect(noCode.attemptQueries).toEqual([]);
+    expect(noCode.attemptCalls).toEqual([]);
   });
 
-  it("fails closed when the attempts cannot be counted", async () => {
-    const d = deps({ session: "fresh", badAttempts: new Error("count failed") });
+  it("fails closed when no attempt can be reserved", async () => {
+    const d = deps({ session: "fresh", badAttempts: new Error("reserve failed") });
     const res = await handle(stepUp(), ENDPOINTS, d);
     expect(res.status).toBe(502);
+    expect((await body(res)).error?.message).toMatch(/code was not tried/);
     expect(d.sessionCalls).toEqual([]);
+  });
+
+  it("refuses parallel guesses past the limit: each request holds its reservation until resolved", async () => {
+    // Every guess reserves before it is tried; pending reservations count, so a burst cannot exceed the limit.
+    let release!: () => void;
+    const gateOpen = new Promise<void>((resolve) => (release = resolve));
+    const d = deps({ session: "fresh", badAttempts: 0, reject: ["000000"] });
+    const slowStepUp = d.sessions.stepUp;
+    d.sessions.stepUp = async (c, k) => {
+      await gateOpen;
+      return slowStepUp(c, k);
+    };
+    const burst = Array.from({ length: CODE_MAX_BAD_ATTEMPTS + 3 }, () => handle(req("POST", "/session/step-up", { code: "000000" }), ENDPOINTS, d));
+    for (let i = 0; i < 100 && d.attemptCalls.length < burst.length; i += 1) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(d.attemptCalls).toHaveLength(burst.length);
+    release();
+    const statuses = (await Promise.all(burst)).map((r) => r.status).sort();
+    expect(statuses.filter((s) => s === 422)).toHaveLength(CODE_MAX_BAD_ATTEMPTS);
+    expect(statuses.filter((s) => s === 429)).toHaveLength(3);
+    expect(d.sessionCalls.filter((c) => c === "stepUp")).toHaveLength(CODE_MAX_BAD_ATTEMPTS);
+    expect(d.attemptRows.map((r) => r.succeeded)).toEqual(Array(CODE_MAX_BAD_ATTEMPTS).fill(false));
+    // Locked: even the right code is not tried now.
+    const after = await handle(stepUp(), ENDPOINTS, d);
+    expect(after.status).toBe(429);
+  });
+
+  it("resolves a wrong password or code as failed, and a code accepted before a later refusal as succeeded", async () => {
+    const wrongPassword = deps({ badAttempts: 0, reject: ["bad-pw"] });
+    expect((await handle(req("POST", "/session/sign-in", { password: "bad-pw", code: "123456" }), ENDPOINTS, wrongPassword)).status).toBe(422);
+    expect(wrongPassword.attemptCalls).toEqual(["reserve:password", "resolve:false"]);
+
+    const goodSignIn = deps({ badAttempts: 0 });
+    expect((await handle(req("POST", "/session/sign-in", { password: "pw", code: "123456" }), ENDPOINTS, goodSignIn)).status).toBe(200);
+    expect(goodSignIn.attemptCalls).toEqual(["reserve:password", "resolve:true"]);
+
+    // The code was accepted (session client created) and then the database refused the action itself.
+    const refused = deps({
+      session: "stale",
+      badAttempts: 0,
+      db: fakeDb({ platform_outbox_event: { id: ID, organization_id: ORG, status: "dead_lettered" } }),
+      userDb: fakeDb({ platform_replay_outbox_event: { error: { code: "22023", message: "only a dead-lettered event can be retried" } } }),
+    });
+    expect((await handle(req("POST", `/health/dead-letters/${ID}/retry`, { reason: "Provider recovered", code: "123456" }), ENDPOINTS, refused)).status).toBe(422);
+    expect(refused.attemptCalls).toEqual(["reserve:mfa", "resolve:true"]);
+  });
+
+  it("keeps the reservation counted when it cannot be resolved", async () => {
+    const d = deps({ session: "fresh", badAttempts: 0, resolveError: new Error("resolve failed") });
+    expect((await handle(stepUp(), ENDPOINTS, d)).status).toBe(200);
+    expect(d.attemptRows.map((r) => r.succeeded)).toEqual([null]);
+    expect(d.logs.some((l) => l.message === "admin api attempt resolution failed")).toBe(true);
   });
 
   it("marks a wrong code in the audit entry (what the lockout counts) without the code itself", async () => {
@@ -140,6 +199,7 @@ describe("L1: authenticator code attempt lockout", () => {
     expect(res.status).toBe(422);
     const entry = outcomeAudits(d.db)[0].args;
     expect(entry).toMatchObject({ p_result: "failure", p_context: { bad_attempt: "code", attempt_user_id: ME } });
+    expect(d.attemptCalls).toEqual(["reserve:mfa", "resolve:false"]);
     expect(JSON.stringify(auditCalls(d.db)) + JSON.stringify(d.logs)).not.toContain("654321");
   });
 });
@@ -208,6 +268,42 @@ describe("L3: database and auth messages stay on the server", () => {
       expect(e.internal).toMatch(/secret_detail/);
     }
     expect(fromDbError({ code: "42501", message: "a recent step-up is required" }).code).toBe("step_up_required");
+  });
+
+  it("passes short plain business rules on 42501 and 55000, maps P0001 to a generic conflict", () => {
+    for (const message of ["the author cannot approve their own version", "cannot remove the last owner", "your reviewer licence is not active"]) {
+      const e = fromDbError({ code: "42501", message });
+      expect(e.code).toBe("forbidden");
+      expect(e.message).toBe(message);
+    }
+    const state = fromDbError({ code: "55000", message: "this import is already finished" });
+    expect(state.code).toBe("conflict");
+    expect(state.message).toBe("this import is already finished");
+    const raised = fromDbError({ code: "P0001", message: "unexpected state in app.platform_admins" });
+    expect(raised.code).toBe("conflict");
+    expect(raised.message).toBe("Casevoya refused this change. Check the details and try again.");
+    expect(raised.internal).toMatch(/app\.platform_admins/);
+    expect(fromDbError({ code: "42501", message: "a platform admin already exists; use an invite instead" }).message).toMatch(/already exists/);
+  });
+
+  it("hides 42501 and 55000 messages that look like internal detail", () => {
+    const internal = [
+      "permission denied for function platform_admin_set_role",
+      'new row for relation "platform_admins" violates row-level security policy',
+      "column secret does not exist",
+      "must be owner of app.platform_admins",
+      "insert on table admins refused",
+      "x".repeat(201),
+      "line one\nline two",
+    ];
+    for (const code of ["42501", "55000"]) {
+      for (const message of internal) {
+        const e = fromDbError({ code, message });
+        expect(e.message, `${code} ${message}`).not.toBe(message);
+        expect(e.message).not.toMatch(/platform_admin|secret|app\.|admins refused/);
+      }
+    }
+    expect(fromDbError({ code: "55000", message: 'column "x" is locked' }).message).toBe("Casevoya refused this change. Check the details and try again.");
   });
 
   it("returns a generic message and logs the redacted detail", async () => {

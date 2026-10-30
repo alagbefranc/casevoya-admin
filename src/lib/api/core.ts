@@ -29,20 +29,28 @@ export type SessionApi = {
   client(caller: SessionCaller, code?: string | null): Promise<{ client: SupabaseClient; status: SessionStatus }>;
 };
 
-/** Wrong authenticator codes / sign-in passwords per admin (src/lib/lockout.ts). Injected so tests need no database. */
+export type AttemptKind = "password" | "mfa";
+export type AttemptReservation = { allowed: boolean; attemptId: string | null; retryAfterSeconds: number };
+
+/**
+ * Atomic per-admin reservation of authenticator code / sign-in password attempts (src/lib/lockout.ts). Injected so
+ * tests need no database. The gate decision comes from `reserve`; unresolved reservations count as failures.
+ */
 export type AttemptStore = {
-  /** Bad attempts recorded for this admin since `sinceIso`. Throws when it cannot count (the request is then refused). */
-  recentBadAttempts(caller: SessionCaller, sinceIso: string): Promise<number>;
+  /** Reserves one attempt, or refuses when the admin is locked out. Throws when it cannot decide (the request is then refused). */
+  reserve(caller: SessionCaller, kind: AttemptKind): Promise<AttemptReservation>;
+  /** Records the outcome of a reserved attempt. */
+  resolve(caller: SessionCaller, attemptId: string, succeeded: boolean): Promise<void>;
 };
 
-/** Wrong codes or passwords allowed per admin in the window before code-bearing requests are refused. */
+/** Wrong codes or passwords allowed per admin in the window before code-bearing requests are refused (enforced by the database). */
 export const CODE_MAX_BAD_ATTEMPTS = 5;
 export const CODE_LOCKOUT_MINUTES = 15;
 
 export type ApiDeps = {
   gate(mode: GateMode): Promise<Caller>;
   sessions: SessionApi;
-  /** Attempt lockout for authenticator codes. When absent no lockout is applied (tests only; the route always sets it). */
+  /** Attempt lockout for authenticator codes and sign-in passwords. When absent no lockout is applied (tests only; the route always sets it). */
   attempts?: AttemptStore;
   /** First-admin Setup operations (src/lib/setup.ts). Only the setup endpoints use it. */
   setup?: SetupApi;
@@ -98,6 +106,8 @@ export type Endpoint<I = unknown> = {
   serviceStepUp?: boolean;
   /** High-risk action: a "started" audit row must be written before the handler runs, else nothing is done. */
   auditRequired?: boolean | ((input: I) => boolean);
+  /** The audit object id known from the gate and input, set before any audit row (including "started") is written. */
+  auditObjectId?: (caller: Caller, input: I) => string | null | undefined;
   /** Requires platform_admins.template_reviewer (pre-check; the database re-checks). */
   reviewer?: boolean;
   /** Every non-GET endpoint has one. Recorded as admin_portal.<action>. */
@@ -211,6 +221,13 @@ function sessionErrorToApi(error: { kind: string; message: string }): ApiError {
   }
 }
 
+/** A wrong authenticator code or sign-in password (SessionError bad_code / bad_credentials). */
+function isBadSecret(error: unknown): boolean {
+  if (!(error instanceof Error) || !("kind" in error)) return false;
+  const kind = (error as Error & { kind: unknown }).kind;
+  return kind === "bad_code" || kind === "bad_credentials";
+}
+
 function json(body: unknown, status: number, requestId: string): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -275,7 +292,7 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
       p_object_id: audit.objectId && UUID_RE.test(audit.objectId) ? audit.objectId : null,
       p_organization_id: audit.organizationId && UUID_RE.test(audit.organizationId) ? audit.organizationId : null,
       p_result: result,
-      p_context: { request_id: requestId, endpoint: endpointName, ...extra, ...(audit.context ?? {}) },
+      p_context: { request_id: requestId, endpoint: endpointName, ...(audit.context ?? {}), ...extra },
     });
     if (error) log("admin api audit write failed", { requestId, action, error: redact(error.message) });
     return !error;
@@ -289,7 +306,24 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
       log("admin api audit outcome missing for a high-risk action (the started entry exists)", { requestId, action, result, alert: "audit_gap" });
     }
   };
+  // Attempt reservation (step 5a): the outcome is taken from the session calls that carry the code or password.
+  let attemptId: string | null = null;
+  let codeAccepted = false;
+  let codeRejected = false;
+  const settleAttempt = async (ok: boolean) => {
+    if (!attemptId || !deps.attempts) return;
+    const id = attemptId;
+    attemptId = null;
+    const succeeded = codeRejected ? false : codeAccepted ? true : ok;
+    try {
+      await deps.attempts.resolve(caller as SessionCaller, id, succeeded);
+    } catch (error) {
+      // The reservation stays pending and keeps counting as a failure.
+      log("admin api attempt resolution failed", { requestId, endpoint: endpointName, error: redact(error instanceof Error ? error.message : String(error)) });
+    }
+  };
   const fail = async (error: ApiError) => {
+    await settleAttempt(false);
     if (error.internal) log("admin api upstream error", { requestId, endpoint: endpointName, code: error.code, detail: redact(error.internal) });
     const result = auditResultFor(error);
     if (result === "denied") log("admin api request refused", { requestId, endpoint: endpointName, code: error.code, role: caller.role ?? null });
@@ -312,77 +346,110 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
   }
   if (endpoint.reviewer && !caller.templateReviewer) return fail(new ApiError("forbidden", "You are not flagged as a template reviewer"));
 
-  // 4. Input.
-  let raw: Record<string, unknown> = mutation ? {} : queryObject(url);
-  if (mutation) {
-    const text = await request.text();
-    if (text.trim()) {
-      try {
-        const parsed = JSON.parse(text) as unknown;
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fail(new ApiError("validation_failed", "The body must be a JSON object", { issues: [{ path: "", message: "The body must be a JSON object" }] }));
-        raw = parsed as Record<string, unknown>;
-      } catch {
-        return fail(new ApiError("validation_failed", "The body is not valid JSON", { issues: [{ path: "", message: "The body is not valid JSON" }] }));
+  // Steps 4 to 6 run inside one try, so any failure (reading the body, the session cookie, the handler) gets the
+  // normal error body and audit entry.
+  try {
+    // 4. Input.
+    let raw: Record<string, unknown> = mutation ? {} : queryObject(url);
+    if (mutation) {
+      const text = await request.text();
+      if (text.trim()) {
+        try {
+          const parsed = JSON.parse(text) as unknown;
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fail(new ApiError("validation_failed", "The body must be a JSON object", { issues: [{ path: "", message: "The body must be a JSON object" }] }));
+          raw = parsed as Record<string, unknown>;
+        } catch {
+          return fail(new ApiError("validation_failed", "The body is not valid JSON", { issues: [{ path: "", message: "The body is not valid JSON" }] }));
+        }
       }
     }
-  }
-  if (Object.keys(params).length) {
-    raw = { ...raw, ...params };
-    if (params.id && UUID_RE.test(params.id)) audit.objectId = params.id;
-  }
-  const parsed = endpoint.input.safeParse(raw);
-  if (!parsed.success) return fail(new ApiError("validation_failed", parsed.error.issues[0]?.message ?? "Check the request", zodDetails(parsed.error)));
-  const input = parsed.data as Record<string, unknown> | undefined;
-  const code = input && typeof input.code === "string" ? input.code : null;
-
-  // 4b. Attempt lockout: a request carrying an authenticator code is refused after too many recent wrong codes or
-  // passwords for this admin (Setup has its own lockout). Fails closed when the count cannot be read.
-  if (code && !("setup" in caller) && deps.attempts) {
-    const since = new Date((nowSeconds() - CODE_LOCKOUT_MINUTES * 60) * 1000).toISOString();
-    let bad: number;
-    try {
-      bad = await deps.attempts.recentBadAttempts(caller, since);
-    } catch (error) {
-      log("admin api attempt count failed", { requestId, endpoint: endpointName, error: redact(error instanceof Error ? error.message : String(error)) });
-      return fail(new ApiError("upstream_error", "Could not check recent code attempts, so the code was not tried. Try again."));
+    if (Object.keys(params).length) {
+      raw = { ...raw, ...params };
+      if (params.id && UUID_RE.test(params.id)) audit.objectId = params.id;
     }
-    if (bad >= CODE_MAX_BAD_ATTEMPTS) {
-      return fail(new ApiError("rate_limited", `Too many wrong codes or passwords. Wait ${CODE_LOCKOUT_MINUTES} minutes, then try again.`, { retryAfterMinutes: CODE_LOCKOUT_MINUTES }));
+    const parsed = endpoint.input.safeParse(raw);
+    if (!parsed.success) return fail(new ApiError("validation_failed", parsed.error.issues[0]?.message ?? "Check the request", zodDetails(parsed.error)));
+    const input = parsed.data as Record<string, unknown> | undefined;
+    const code = input && typeof input.code === "string" ? input.code : null;
+    if (endpoint.auditObjectId) {
+      const objectId = endpoint.auditObjectId(caller, parsed.data);
+      if (objectId) audit.objectId = objectId;
     }
-  }
 
-  // 5. Own session / step-up pre-check. The cookie is not trusted on its own: user-session functions re-check in
-  // the database, and service-role writes (serviceStepUp) prove the step-up with platform_step_up_check below.
-  const need: SessionNeed = typeof endpoint.session === "function" ? endpoint.session(parsed.data) : (endpoint.session ?? "none");
-  if (need !== "none") {
-    if ("setup" in caller) return fail(new ApiError("internal", "Setup endpoints check their own session"));
-    const status = await deps.sessions.status(caller);
-    if (!status.signedIn) return fail(new ApiError("session_required", "Sign in with your password and authenticator code first"));
-    if (!status.matchesAccessUser) return fail(new ApiError("session_required", "Your admin session belongs to a different user; sign in again"));
-    if (need === "step_up" && !code) {
-      const now = nowSeconds();
-      const fresh = status.aal === "aal2" && status.stepUpFreshUntil != null && status.stepUpFreshUntil > now + 5;
-      if (!fresh) return fail(new ApiError("step_up_required", STEP_UP_MESSAGE));
+    // 5. Own session / step-up pre-check. The cookie is not trusted on its own: user-session functions re-check in
+    // the database, and service-role writes (serviceStepUp) prove the step-up with platform_step_up_check below.
+    const need: SessionNeed = typeof endpoint.session === "function" ? endpoint.session(parsed.data) : (endpoint.session ?? "none");
+    if (need !== "none") {
+      if ("setup" in caller) return fail(new ApiError("internal", "Setup endpoints check their own session"));
+      const status = await deps.sessions.status(caller);
+      if (!status.signedIn) return fail(new ApiError("session_required", "Sign in with your password and authenticator code first"));
+      if (!status.matchesAccessUser) return fail(new ApiError("session_required", "Your admin session belongs to a different user; sign in again"));
+      if (need === "step_up" && !code) {
+        const now = nowSeconds();
+        const fresh = status.aal === "aal2" && status.stepUpFreshUntil != null && status.stepUpFreshUntil > now + 5;
+        if (!fresh) return fail(new ApiError("step_up_required", STEP_UP_MESSAGE));
+      }
     }
-  }
 
-  // 5b. High-risk actions: the "started" audit entry must be written before anything changes.
-  const auditRequired = typeof endpoint.auditRequired === "function" ? endpoint.auditRequired(parsed.data) : Boolean(endpoint.auditRequired);
-  if (mutation && endpoint.audit && auditRequired) {
-    if (!(await writeAudit(`admin_portal.${endpoint.audit.action}.started`, "success", { phase: "started" }))) {
-      return fail(new ApiError("upstream_error", "The audit log could not be written, so nothing was changed. Try again."));
+    // 5a. Attempt lockout: every request carrying an authenticator code (sign-in also carries the password) reserves
+    // an attempt for this admin in the database first; the database refuses once too many recent attempts failed
+    // (Setup has its own lockout). Fails closed when no reservation can be made.
+    if (code && !("setup" in caller) && deps.attempts) {
+      let reservation: AttemptReservation;
+      try {
+        reservation = await deps.attempts.reserve(caller, typeof input?.password === "string" ? "password" : "mfa");
+      } catch (error) {
+        log("admin api attempt reservation failed", { requestId, endpoint: endpointName, error: redact(error instanceof Error ? error.message : String(error)) });
+        return fail(new ApiError("upstream_error", "Could not check recent code attempts, so the code was not tried. Try again."));
+      }
+      if (!reservation.allowed) {
+        const minutes = Math.max(1, Math.ceil(reservation.retryAfterSeconds / 60));
+        return fail(
+          new ApiError("rate_limited", `Too many wrong codes or passwords. Wait ${minutes} minute${minutes === 1 ? "" : "s"}, then try again.`, {
+            retryAfterMinutes: minutes,
+            retryAfterSeconds: reservation.retryAfterSeconds,
+          }),
+        );
+      }
+      attemptId = reservation.attemptId;
     }
-    highRisk = true;
-  }
 
-  // 6. Handler. The own-session client is created once per request (a code is verified at most once).
-  let own: Promise<SupabaseClient> | null = null;
-  const userClient = (): Promise<SupabaseClient> => {
-    if ("setup" in caller) return Promise.reject(new ApiError("internal", "Setup endpoints have no admin session client"));
-    own ??= deps.sessions.client(caller, code).then((r) => r.client);
-    return own;
-  };
-  try {
+    // 5b. High-risk actions: the "started" audit entry must be written before anything changes.
+    const auditRequired = typeof endpoint.auditRequired === "function" ? endpoint.auditRequired(parsed.data) : Boolean(endpoint.auditRequired);
+    if (mutation && endpoint.audit && auditRequired) {
+      if (!(await writeAudit(`admin_portal.${endpoint.audit.action}.started`, "success", { phase: "started" }))) {
+        return fail(new ApiError("upstream_error", "The audit log could not be written, so nothing was changed. Try again."));
+      }
+      highRisk = true;
+    }
+
+    // 6. Handler. The own-session client is created once per request (a code is verified at most once). Session
+    // calls that carry the code record whether it was accepted (the reserved attempt's outcome).
+    const track = <T>(call: Promise<T>): Promise<T> =>
+      call.then(
+        (value) => {
+          codeAccepted = true;
+          return value;
+        },
+        (error: unknown) => {
+          if (isBadSecret(error)) codeRejected = true;
+          throw error;
+        },
+      );
+    const sessions: SessionApi = {
+      ...deps.sessions,
+      signIn: (c, password, k) => track(deps.sessions.signIn(c, password, k)),
+      stepUp: (c, k) => track(deps.sessions.stepUp(c, k)),
+    };
+    let own: Promise<SupabaseClient> | null = null;
+    const userClient = (): Promise<SupabaseClient> => {
+      if ("setup" in caller) return Promise.reject(new ApiError("internal", "Setup endpoints have no admin session client"));
+      if (!own) {
+        const call = deps.sessions.client(caller, code);
+        own = (code ? track(call) : call).then((r) => r.client);
+      }
+      return own;
+    };
     if (need === "step_up" && endpoint.serviceStepUp) await proveStepUp(await userClient(), caller.userId as string);
     const ctx: HandlerCtx<unknown> = {
       caller: caller as SessionCaller,
@@ -391,19 +458,20 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
       db: caller.db,
       input: parsed.data,
       requestId,
-      deps,
+      deps: { ...deps, sessions },
       audit,
       log,
       userClient,
     };
     const data = await endpoint.handler(ctx);
+    await settleAttempt(true);
     await finishAudit("success");
     return json({ data: data ?? null, requestId }, endpoint.status ?? 200, requestId);
   } catch (error) {
     if (error instanceof ApiError) return fail(error);
     if (error && typeof error === "object" && "kind" in error && error instanceof Error) {
       const kind = (error as Error & { kind: string }).kind;
-      // Marks the audit entry as a bad attempt (what the lockout counts). Never includes the value.
+      // Marks the audit entry as a bad attempt (history; the lockout decision comes from the attempt store). Never includes the value.
       if ((kind === "bad_code" || kind === "bad_credentials") && !("setup" in caller)) {
         audit.context = { ...(audit.context ?? {}), bad_attempt: kind === "bad_code" ? "code" : "password", attempt_user_id: caller.userId };
       }

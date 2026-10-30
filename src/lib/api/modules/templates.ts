@@ -76,7 +76,9 @@ async function setSources(db: SupabaseClient, versionId: string, sources: z.infe
     await rpc(db, "set_shared_template_version_sources", { p_version_id: versionId, p_sources: sourcesForDb(sources), p_actor: actor });
   } catch (error) {
     if (error instanceof ApiError) {
-      throw new ApiError(error.code, `${verb}, but its sources were not saved: ${error.message}`, { versionId, issues: [{ path: "sources", message: error.message }] });
+      const out = new ApiError(error.code, `${verb}, but its sources were not saved: ${error.message}`, { versionId, issues: [{ path: "sources", message: error.message }] });
+      out.internal = error.internal;
+      throw out;
     }
     throw error;
   }
@@ -144,7 +146,9 @@ const decision = (action: "approve" | "reject" | "rollback") =>
           result = await rpc(client, "approve_shared_template_version", { p_version_id: i.id, p_expected_review_hash: i.reviewHash });
         } catch (error) {
           if (error instanceof ApiError && error.code === "conflict" && (error.details as { reload?: boolean } | undefined)?.reload) {
-            throw new ApiError("conflict", REVIEW_CHANGED_MESSAGE, { reload: true, reason: "review_changed" });
+            const out = new ApiError("conflict", REVIEW_CHANGED_MESSAGE, { reload: true, reason: "review_changed" });
+            out.internal = error.internal;
+            throw out;
           }
           throw error;
         }
