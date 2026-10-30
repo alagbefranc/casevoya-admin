@@ -54,6 +54,8 @@ export function fromDbError(error: DbError): ApiError {
   if (["22023", "22P02", "23514", "22007", "22008", "23502", "22001", "22003"].includes(code)) return new ApiError("validation_failed", message);
   if (code === "P0002" || code === "PGRST116") return new ApiError("not_found", message);
   if (code === "23505" || code === "40001" || code === "55P03") return new ApiError("conflict", message);
+  // PostgREST's PT409: the row changed since the caller read it (e.g. a template review hash mismatch).
+  if (code === "PT409") return new ApiError("conflict", message, { reload: true });
   if (code === "PGRST202") return new ApiError("upstream_error", "A database function the portal needs is missing (is the main-app migration applied?)");
   return new ApiError("upstream_error", message);
 }

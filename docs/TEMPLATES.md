@@ -17,9 +17,10 @@ still edit their own copy.
 
 | Action | Who | Checks |
 | -- | -- | -- |
-| Draft / revise | any platform admin (revise: the author only) | Access JWT + `platform_admins`; at least one official https source |
-| Approve = publish | the flagged reviewer, never the author | portal: `platform_admins.template_reviewer` flag, owner/operator role, licence pre-check, own reviewer session tied to the Access user, fresh TOTP code, confirm tick. Database: not service role, platform admin, aal2, TOTP within 15 min, active licence, not the author |
-| Reject (reason 3–500 chars) | the flagged reviewer | same as approve |
+| Draft / revise | any platform admin (revise: the author only, not while in review) | Access JWT + `platform_admins`; at least one official https source |
+| Submit for review / withdraw from review | the draft's author (owner/operator) | service role naming the author (`submit_/withdraw_shared_template_version`). Submitting needs an official source and freezes content and sources until approve, reject or withdraw |
+| Approve = publish | the flagged reviewer, never the author; only a submitted draft | portal: `platform_admins.template_reviewer` flag, owner/operator role, licence pre-check, own reviewer session tied to the Access user, fresh TOTP code, confirm tick, the review hash shown with the content (`shared_template_review_hash`, read before the content). Database (`approve_shared_template_version(uuid, text)`): not service role, platform admin, aal2, TOTP within 15 min, active licence, not the author, hash still matches what was shown and what was submitted (else 409 "reload") |
+| Reject (reason 3–500 chars) | the flagged reviewer | same session rules as approve |
 
 The reviewer session: password + authenticator code, kept in one httpOnly, Secure, SameSite=Strict,
 host-only cookie for at most an hour, used only for the RPCs that must run as the admin (enforced by
