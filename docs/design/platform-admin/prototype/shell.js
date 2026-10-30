@@ -7,7 +7,7 @@ function shell(o={}){
  const A=(h,ic,t,k='')=>`<a href="${h}" class="${here(h)?'on':''}">${ic.startsWith('av:')?AV(ic.slice(3)):I(ic)}<span>${t}</span>${k}</a>`;
  const tiles=[['intake-builder.html','#0075DE','file-check','Intake','I'],['matter.html?tab=documents','#2f6db3','folder','Documents','D'],['calendar.html','#3a3a3a','calendar','Calendar','C'],['matter.html?tab=billing','#484848','invoice','Invoices','B'],['drafts.html','#0a4b93','sparkles','Vo drafts','V']];
  const grp=(ic,t,items)=>`<div class="grp"><button aria-expanded="true">${I(ic)}<span>${t}</span>${I('chevron-down','s ch')}</button><div class="tree">${items}</div></div>`;
- const side=o.admin?ADMIN_SIDE(A,grp):`<aside class="side" id="side" aria-label="Main">
+ const side=o.admin?ADMIN_SIDE():`<aside class="side" id="side" aria-label="Main">
  <div class="brand"><a href="index.html"><img src="../../assets/brand/casevoya-wordmark-white.svg" alt="Casevoya" width="126" height="20"></a><button id="mClose" aria-label="Close menu" style="color:#8b8680">${I('close')}</button></div>
  <div class="tiles">${tiles.map(([h,c,ic,t,k])=>`<a class="tile" href="${h}" style="background:${c}" aria-label="${t}">${I(ic)}<span class="tip">${t}<kbd>${k}</kbd></span></a>`).join('')}</div>
  <nav class="nav">${A('index.html','home','Home')}<a href="#" onclick="palette();return false">${I('search')}<span>Search…</span><span class="k" aria-label="Command K"><svg class="cmdk" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg>K</span></a>${A('notifications.html','bell','Notifications','<span class="k">5</span>')}${A('drafts.html','sparkles','Vo drafts','<span class="k b">3</span>')}</nav>
@@ -36,14 +36,18 @@ function shell(o={}){
  requestAnimationFrame(()=>{document.querySelectorAll('#content>*').forEach((e,i)=>{if(!e.classList.contains('rv')){e.classList.add('rv');e.style.setProperty('--i',i)}})});
 }
 // Platform administration shell (PRD §4, DESIGN §5): same Sheet look, clearly labelled header, no client content by default.
-const ADMIN_SIDE=(A,grp)=>`<aside class="side adm" id="side" aria-label="Platform administration">
+// Platform administration shell (FRONTEND-SPEC §1.5): groups Operate / Platform / Records, names exactly as the spec.
+// Active item is decided by ?tab= only, so Overview never lights up on another page (fixes the double highlight).
+const ADMIN_SIDE=()=>{const cur=Q.get('tab')||'overview',ro=Q.get('role')||'owner';
+ const L=(k,ic,t,b='')=>`<a href="admin.html?tab=${k}${ro!='owner'?'&role='+ro:''}" class="${cur==k?'on':''}" ${cur==k?'aria-current="page"':''}>${I(ic)}<span>${t}</span>${b}</a>`;
+ const G=(t,items)=>`<div class="grp axg"><div class="axgl">${t}</div><div class="tree">${items}</div></div>`;
+ const K=(t,c='')=>`<span class="k axk ${c}">${t}</span>`;
+ return `<aside class="side adm" id="side" aria-label="Platform administration">
  <div class="brand"><a href="admin.html" class="admk"><img src="../../assets/brand/vo-mark-white.svg" alt="" width="22" height="22"><span>Casevoya admin</span></a><button id="mClose" aria-label="Close menu" style="color:#8b8680">${I('close')}</button></div>
- <div class="admtag">${I('shield','s')}Platform administration</div>
- <nav class="nav">${A('admin.html','home','Overview')}</nav>
- ${grp('building','Tenants',A('admin.html?tab=firms','building','Firms')+A('admin.html?tab=verification','id-card','Verification','<span class="k">3</span>')+A('admin.html?tab=subscriptions','credit-card','Subscriptions','<span class="k">2</span>')+A('admin.html?tab=usage','dashboard','Usage and quotas'))}
- ${grp('health','Operations',A('admin.html?tab=health','health','Service health')+A('admin.html?tab=grants','key','Support grants')+A('admin.html?tab=releases','templates','Template releases')+A('admin.html?tab=incidents','incident','Incidents')+A('admin.html?tab=privacy','privacy','Privacy requests')+A('admin.html?tab=audit','history','Audit')+A('admin.html?tab=config','toggle','Configuration'))}
- ${grp('shield','Casevoya team',A('admin.html?tab=admins','users','Admins','<span class="k">1</span>'))}
- <div class="me">${AV('jordan')}<div>Jordan Reid<small>Platform administrator</small></div></div></aside>`;
+ ${G('Operate',L('overview','home','Overview')+L('firms','building','Firms')+L('subscriptions','credit-card','Subscriptions',K('4 exceptions','w'))+L('usage','dashboard','Usage')+L('verification','id-card','Verification',K('4 to check','w'))+L('grants','key','Grants',K('1 pending')))}
+ ${G('Platform',L('health','health','Health',K('Unhealthy','b'))+L('incidents','incident','Incidents')+L('releases','templates','Releases',K('1 to review','w'))+L('config','settings','Config'))}
+ ${G('Records',L('audit','history','Audit log')+L('privacy','privacy','Privacy')+L('sample','grid','Sample mode')+L('migration','import','Migration'))}
+ </aside>`};
 // Shared right-bar blocks for matter pages
 const MATTER_RBAR=()=>`<h4>Assist</h4>${voCard('Rafael’s photos don’t show dates. Draft request: “Please add a short note with the date and place for each photo.”','request DR-12, checklist v3','done','voAssist')}
 <h4>Agreement</h4><div class="card" style="display:flex;gap:10px"><span style="color:#f0a200">${I('download','s')}</span><div>Service agreement v2 · executed<small>2 of 2 signed · 28 Sep · DocuSign (planned)</small></div></div>

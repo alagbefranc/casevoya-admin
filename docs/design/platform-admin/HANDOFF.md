@@ -36,3 +36,14 @@ The Overview charts copy the *look* of Mebius "Free Charts" (Keitoto Studio) fro
 
 ## Not included
 The design kit, Core UI Pro or Hugeicons icon files or sprites, Mebius files, and anything secret. Screenshots only show the rendered icons.
+
+## Spec alignment pass (29 Oct 2026)
+Brought the prototype in line with `docs/FRONTEND-SPEC.md`:
+- Session screens: no access, gate error, invite, sign-in, step-up, access ended, session mismatch.
+- Overview renamed "Operations": 5+4 cards, newest firms, support grants, no-impersonation line, no charts (meters only from real counts).
+- Health dead letters with retry confirm (reason 8–500, "Queued for retry"); Config › Admins (owners only, last-owner lock, typed-email remove, invites).
+- Stubs/notes for unbuilt items: feature flags, breach register, invite email delivery, read-only switches, audit export, emergency procedure, usage notice, app release notes.
+- Nav grouped Operate / Platform / Records; midnight top bar; amber metadata-only banner; single active highlight.
+- Shared states via `?state=`, viewer/operator role variants via `?role=`, form validation, sub-pages.
+Screenshots: `screenshots/spec-pass/` (63 views × 1440/390, contact sheets `contact-1440.jpg`, `contact-390.jpg`).
+Licensed icons/fonts/kit and Mebius files are not included; the prototype expects them at `../assets` and `../kit` when run locally.
