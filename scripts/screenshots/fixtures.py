@@ -183,3 +183,192 @@ def ops_routes():
         "/templates/history/retainer_agreement": HISTORY,
         "/templates": TEMPLATES,
     }
+
+
+# ---------------------------------------------------------------- PR 3: subscriptions, usage, verification
+# Licence numbers use the R9990xx range so they cannot be mistaken for real College members.
+
+def _exc(n, name, status, plan, reasons, **dates):
+    base = {"organization_id": uid(n), "firm_name": name, "sample_mode": n == 8, "status": status, "plan": plan, "billing_interval": "month", "reasons": reasons,
+            "trial_ends_at": None, "current_period_end": iso(days=20), "cancel_at": None, "past_due_since": None, "restricted_at": None,
+            "latest_invoice_status": "paid", "stripe_customer_id": f"cus_EXAMPLE{n:04d}", "updated_at": iso(days=-1)}
+    base.update(dates)
+    return base
+
+
+SUB_ITEMS = [
+    _exc(10, "Old Town Immigration", "restricted", "solo", ["restricted"], restricted_at=iso(days=-7)),
+    _exc(6, "Lakeside Visa Services", "past_due", "practice", ["past_due", "invoice_unpaid"], past_due_since=iso(days=-10), latest_invoice_status="open"),
+    _exc(8, "Maple Pathways", "trial", "solo", ["trial_ending"], trial_ends_at=iso(days=2), latest_invoice_status=None, stripe_customer_id=None),
+    _exc(2, "Fraser Consulting", "active", "solo", ["cancel_scheduled"], cancel_at=iso(days=1)),
+]
+SUBSCRIPTIONS = {"items": SUB_ITEMS, "total": 4, "limit": 100, "offset": 0, "by_reason": {"past_due": 1, "invoice_unpaid": 1, "restricted": 1, "trial_ending": 1, "cancel_scheduled": 1}, "by_status": {"active": 3, "trial": 1, "past_due": 1, "restricted": 1}}
+
+GB = 1024 ** 3
+
+
+def _use(n, name, plan, status, seats, seat_limit, matters, matter_limit, storage_gb, storage_limit_gb, runs, failed, cost, flags=(), invited=0, sample_matters=0):
+    return {"organization_id": uid(n), "display_name": name, "slug": name.lower().replace(" ", "-"), "sample_mode": n == 8, "plan": plan, "subscription_status": status,
+            "seats_active": seats, "seats_invited": invited, "seat_limit": seat_limit, "active_matters": matters, "sample_matters": sample_matters, "matter_limit": matter_limit,
+            "storage_bytes": int(storage_gb * GB), "storage_limit_bytes": storage_limit_gb * GB if storage_limit_gb else None,
+            "ai_runs_30d": runs, "ai_failed_30d": failed, "ai_tokens_30d": runs * 2100, "ai_cost_usd_30d": cost, "flags": list(flags)}
+
+
+USAGE_ITEMS = [
+    _use(12, "Harbourview Legal", "enterprise", "active", 18, None, 612, None, 420, None, 640, 6, 41.20),
+    _use(4, "Northline Immigration", "practice", "active", 6, 10, 214, 1000, 96, 200, 301, 1, 19.90, invited=2),
+    _use(6, "Lakeside Visa Services", "practice", "past_due", 4, 10, 180, 1000, 188, 200, 190, 4, 12.10, flags=["storage_near"]),
+    _use(10, "Old Town Immigration", "solo", "restricted", 1, 2, 104, 100, 21, 20, 48, 0, 3.80, flags=["matters_over", "storage_over"]),
+    _use(2, "Fraser Consulting", "solo", "active", 2, 2, 31, 100, 4, 20, 105, 2, 9.40, flags=["seats_near"]),
+    _use(8, "Maple Pathways", None, "trial", 1, None, 6, None, 0.2, None, 0, 0, 0, sample_matters=6),
+]
+USAGE = {"items": USAGE_ITEMS, "total": 6, "flagged_total": 3, "limit": 50, "offset": 0, "near_threshold": 0.9, "ai_window_days": 30,
+         "totals": {"seats_active": 32, "active_matters": 1147, "storage_bytes": int(729.2 * GB), "ai_runs_30d": 1284, "ai_cost_usd_30d": 86.40},
+         "plans": {"solo": {"seats": 2, "matters": 100, "storage_gb": 20, "monthly_cents": 4900}, "practice": {"seats": 10, "matters": 1000, "storage_gb": 200, "monthly_cents": 14900}, "firm": {"seats": 30, "matters": 5000, "storage_gb": 1000, "monthly_cents": 39900}, "enterprise": {"seats": None, "matters": None, "storage_gb": None, "monthly_cents": None}}}
+
+QUEUE_ROWS = [
+    {"credential_id": uid(501), "organization_id": uid(4), "firm_name": "Northline Immigration", "licence_type": "rcic", "college_id": "R999018", "status": "verified", "register_status": "active", "bucket": "needs_review", "latest_result": "needs_review", "checked_at": iso(days=-2), "next_review_at": iso(days=-1), "valid_until": iso(days=63), "verification_method": "manual", "member_role": "consultant"},
+    {"credential_id": uid(502), "organization_id": uid(8), "firm_name": "Maple Pathways", "sample_mode": True, "licence_type": "rcic-irb", "college_id": "R999002", "status": "unverified", "register_status": None, "bucket": "never_checked", "latest_result": None, "checked_at": None, "next_review_at": None, "valid_until": None, "verification_method": None, "member_role": "owner"},
+    {"credential_id": uid(503), "organization_id": uid(6), "firm_name": "Lakeside Visa Services", "licence_type": "rcic", "college_id": "R999045", "status": "verified", "register_status": "active", "bucket": "due", "latest_result": "verified", "checked_at": iso(days=-107), "next_review_at": iso(days=1), "valid_until": iso(days=63), "verification_method": "cicc_list", "member_role": "owner"},
+    {"credential_id": uid(504), "organization_id": uid(2), "firm_name": "Fraser Consulting", "licence_type": "rcic", "college_id": "R999077", "status": "verified", "register_status": "active", "bucket": "overdue", "latest_result": "verified", "checked_at": iso(days=-120), "next_review_at": iso(days=-3), "valid_until": iso(days=63), "verification_method": "manual", "member_role": "owner"},
+]
+QUEUE = {"kind": "all", "counts": {"adverse": 0, "needs_review": 1, "never_checked": 1, "overdue": 1, "due": 2, "all": 4}, "items": QUEUE_ROWS, "total": 4, "limit": 50, "offset": 0}
+CICC_IMPORT = {"id": uid(551), "imported_at": iso(days=-15), "imported_by_email": "kenji@example.test", "source_note": "college-ic.ca public register export (CSV)", "row_count": 9812, "status": "complete", "completed_at": iso(days=-15, minutes=2), "file_sha256": "3f9a1c0be47d2e55a01c9d8e7f6b5a4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a",
+               "needs_review": [{"credential_id": uid(501), "organization_id": uid(4), "firm_name": "Northline Immigration", "licence_type": "rcic", "college_id": "R999018", "credential_status": "verified", "checked_at": iso(days=-15), "reason": "Name on the list does not match the consultant's profile"}]}
+VER_SUMMARY = {"firmsByVerification": {"verified": 4, "pending_review": 1, "unverified": 0, "restricted": 1}, "licenceCounts": QUEUE["counts"], "workload": {"firms_pending_review": 1, "credentials_needing_review": 1, "credentials_never_checked": 1}, "latestCiccImport": CICC_IMPORT}
+CREDENTIAL = {
+    "credential": {"id": uid(501), "organization_id": uid(4), "firm_name": "Northline Immigration", "licence_type": "rcic", "college_id": "R999018", "status": "verified", "register_status": "active", "entitlement_to_practise": True,
+                   "discipline_suspended": False, "discipline_revoked": False, "discipline_restricted": False, "discipline_restriction_detail": None, "verification_method": "manual",
+                   "source_url": "https://register.college-ic.ca/Public-Register-EN/Licensee/Profile.aspx", "declared_at": iso(days=-300), "checked_at": iso(days=-2), "next_review_at": iso(days=-1), "valid_until": iso(days=63), "member_role": "consultant"},
+    "checks": [
+        {"id": uid(5101), "result": "needs_review", "retrieved_at": iso(days=-2), "source_host": "register.college-ic.ca", "method": "manual", "register_status": "active", "reviewer_email": "kenji@example.test", "proof_locator": "drive://licence-evidence/R999018-check.png", "created_at": iso(days=-2), "cicc_import_id": None},
+        {"id": uid(5102), "result": "verified", "retrieved_at": iso(days=-107), "source_host": None, "method": "cicc_list", "register_status": "active", "reviewer_email": None, "proof_locator": None, "created_at": iso(days=-107), "cicc_import_id": uid(550)},
+        {"id": uid(5103), "result": "verified", "retrieved_at": iso(days=-230), "source_host": "register.college-ic.ca", "method": "manual", "register_status": "active", "reviewer_email": "mina@example.test", "proof_locator": "drive://licence-evidence/R999018-initial.png", "created_at": iso(days=-230), "cicc_import_id": None},
+    ],
+    "change_reports": [],
+}
+
+
+def records_routes():
+    return {
+        "/subscriptions/exceptions": SUBSCRIPTIONS,
+        "/usage": USAGE,
+        "/verification/summary": VER_SUMMARY,
+        "/licences/queue": QUEUE,
+        "/licences/cicc-imports": {"imports": [CICC_IMPORT]},
+        "/licences/credentials/" + uid(501): CREDENTIAL,
+    }
+
+
+# --- Config, admins, audit, privacy, sample mode, migration (all fictional) ---
+def _setting(key, value, desc, days_ago, version, pending=False):
+    editable = isinstance(value, dict) and set(value) == {"unit", "count"}
+    units = (["business_days"] if key == "licence.manual_check_target" else ["days", "months"]) if editable else []
+    return {"key": key, "value": value, "description": desc, "pending_confirmation": pending, "created_at": iso(days=-200), "updated_at": None if pending else iso(days=-days_ago), "version": version, "editable": editable, "allowed_units": units}
+
+
+SETTINGS = [
+    _setting("email.support_address", {"address": "support@example.test"}, "Where firms reach support", 120, 1),
+    _setting("licence.manual_check_target", {"unit": "business_days", "count": 2}, "Target to finish a manual check", 0, 1, pending=True),
+    _setting("licence.recheck_interval", {"unit": "days", "count": 90}, "How often a current licence is checked again", 78, 2),
+    _setting("sample_mode.allowed", {"enabled": True}, "Firms may turn on sample mode", 150, 1),
+    _setting("source.recheck_interval.canada.ca", {"unit": "days", "count": 30}, "How often canada.ca sources are re-read", 120, 1),
+    _setting("support.grant_requests", {"enabled": True}, "Admins may request firm-approved support access", 90, 1),
+    _setting("trial.duration", {"unit": "days", "count": 14}, "Length of a new firm's free trial", 57, 3),
+    _setting("uploads.max_mb", {"documents": 50, "imports": 200}, "Upload size limits", 150, 1),
+]
+CONFIG = {"settings": SETTINGS, "switches": [{"key": s["key"], "enabled": s["value"]["enabled"], "description": s["description"], "editable": False} for s in SETTINGS if isinstance(s["value"], dict) and "enabled" in s["value"]],
+          "featureFlags": {"items": [], "stub": True, "gap": "No feature-flag service yet. The switches shown are product settings whose value has an `enabled` boolean; per-firm or percentage flags do not exist."}}
+
+ADMINS = {
+    "admins": [
+        {"user_id": uid(900), "email": "jordan@example.test", "role": "owner", "template_reviewer": False, "note": None, "created_at": iso(days=-300), "created_by_email": None, "last_sign_in_at": iso(minutes=-20), "verified_factors": 1, "licensed": False},
+        {"user_id": uid(901), "email": "kenji@example.test", "role": "operator", "template_reviewer": True, "note": "Licensing lead", "created_at": iso(days=-262), "created_by_email": "jordan@example.test", "last_sign_in_at": iso(minutes=-190), "verified_factors": 2, "licensed": True},
+        {"user_id": uid(902), "email": "mina@example.test", "role": "operator", "template_reviewer": True, "note": None, "created_at": iso(days=-262), "created_by_email": "jordan@example.test", "last_sign_in_at": iso(days=-1), "verified_factors": 1, "licensed": False},
+        {"user_id": uid(903), "email": "ava@example.test", "role": "viewer", "template_reviewer": False, "note": None, "created_at": iso(days=-56), "created_by_email": "kenji@example.test", "last_sign_in_at": iso(days=-8), "verified_factors": 1, "licensed": False},
+    ],
+    "invites": [
+        {"id": uid(1101), "email": "daniel@example.test", "role": "operator", "template_reviewer": False, "note": "Support rotation", "status": "pending", "invited_by_email": "jordan@example.test", "invited_at": iso(days=-1), "expires_at": iso(days=6), "accepted_at": None, "cancelled_at": None},
+        {"id": uid(1102), "email": "priya@example.test", "role": "viewer", "template_reviewer": False, "note": None, "status": "expired", "invited_by_email": "kenji@example.test", "invited_at": iso(days=-16), "expires_at": iso(days=-9), "accepted_at": None, "cancelled_at": None},
+        {"id": uid(1103), "email": "ava@example.test", "role": "viewer", "template_reviewer": False, "note": None, "status": "accepted", "invited_by_email": "kenji@example.test", "invited_at": iso(days=-57), "expires_at": iso(days=-50), "accepted_at": iso(days=-56), "cancelled_at": None},
+    ],
+    "removals": [
+        {"id": uid(1201), "user_id": uid(904), "email": "sam@example.test", "role": "operator", "removed_at": iso(days=-40), "removed_by_email": "jordan@example.test", "reason": "Left the company."},
+    ],
+}
+INVITE_OK = {"id": uid(1104), "accessReady": False, "nextSteps": [
+    "Add the email to the Cloudflare Access policy for admin.casevoya.ca.",
+    "Add the email to ADMIN_ALLOWED_EMAILS in casevoya-admin/wrangler.jsonc and deploy.",
+    "Tell them to sign in to admin.casevoya.ca and accept the invite (they need a Casevoya account with an authenticator app).",
+]}
+
+
+def _ev(n, mins, action, result, actor, firm_n, firm, table, obj, ctx=None, diff=None, actor_type="admin"):
+    return {"id": uid(1300 + n), "occurred_at": iso(minutes=-mins), "action": action, "result": result, "actor_type": actor_type, "actor_user_id": uid(901) if actor else None, "actor_email": actor,
+            "organization_id": uid(firm_n) if firm_n else None, "firm_name": firm, "object_table": table, "object_id": obj, "request_id": f"req_{n:02d}a7c41e", "context": ctx, "diff_keys": diff or []}
+
+
+AUDIT = {"items": [
+    _ev(1, 7, "admin_portal.health.replayed", "success", "mina@example.test", 1, "Northline Immigration", "outbox_events", uid(801), {"event_type": "email.send", "reason": "Mail provider fixed the rejected-recipient bug."}),
+    _ev(2, 34, "support_access.approved", "success", None, 1, "Northline Immigration", "support_access_requests", uid(302), {"minutes": 60, "scope": "matter_documents"}, actor_type="firm_owner"),
+    _ev(3, 300, "licence.checked", "success", "kenji@example.test", 1, "Northline Immigration", "consultant_credentials", uid(501), {"method": "manual", "result": "verified"}),
+    _ev(4, 1290, "admin_portal.config.setting_changed", "denied", "ava@example.test", None, None, "product_settings", None, {"error_code": "forbidden", "key": "trial.duration"}),
+    _ev(5, 1720, "subscription.payment_failed", "failure", None, 6, "Lakeside Visa Services", "organization_subscriptions", uid(1401), None, ["status", "latest_invoice_status"], actor_type="system"),
+], "limit": 50, "next_cursor": {"before_at": iso(minutes=-1720), "before_id": uid(1305)}}
+
+
+def _pr(n, firm_n, firm, ref, kind, channel, received, due, left, stage, assigned, outcome=None, closed=False, extended=None, sample=False):
+    return {"id": uid(1500 + n), "organization_id": uid(firm_n), "firm_name": firm, "reference": ref, "kind": kind, "channel": channel, "received_on": received, "due_on": due, "extended_due_on": extended, "effective_due_on": extended or due,
+            "target_days": 30, "days_left": None if closed else left, "overdue": not closed and left < 0, "due_soon": not closed and 0 <= left <= 5, "stage": stage, "assigned": assigned, "outcome": outcome, "closed_at": iso(days=-3) if closed else None, "is_sample": sample}
+
+
+def _d(days):
+    return (NOW + timedelta(days=days)).date().isoformat()
+
+
+PRIVACY = {"items": [
+    _pr(1, 6, "Lakeside Visa Services", "PR-0031", "access", "email", _d(-35), _d(-5), -5, "identity_verified", True),
+    _pr(2, 1, "Northline Immigration", "PR-0040", "correction", "portal", _d(-26), _d(4), 4, "scoped", True),
+    _pr(3, 3, "Harbourview Legal", "PR-0044", "access", "letter", _d(-9), _d(21), 21, "received", False),
+    _pr(4, 1, "Northline Immigration", "PR-0038", "deletion", "portal", _d(-40), _d(-10), 34, "scoped", True, extended=_d(24)),
+], "total": 4, "summary": {"open": 4, "overdue": 1, "due_soon": 1, "closed_30d": 4, "open_by_kind": {"access": 2, "correction": 1, "deletion": 1}}, "due_soon_days": 5, "limit": 50, "offset": 0}
+BREACHES = {"items": [], "total": 0, "limit": 50, "offset": 0, "stub": True, "gap": "No data source yet: there is no breach (privacy incident) register table. Firms record breaches outside Casevoya today."}
+
+PROOF = ["intake", "agreement", "upload", "reminder", "invoice", "export"]
+SAMPLE = {"items": [
+    {"organization_id": uid(5), "display_name": "Maple Pathways", "slug": "maple-pathways", "sample_mode": True, "sample_matters": 6, "real_matters": 0, "sample_privacy_requests": 1, "sample_migration_batches": 1, "sample_ai_runs": 14, "proof_steps_done": PROOF[:3], "proof_complete": False, "mixed": False},
+    {"organization_id": uid(4), "display_name": "Fraser Consulting", "slug": "fraser-consulting", "sample_mode": False, "sample_matters": 2, "real_matters": 11, "sample_privacy_requests": 0, "sample_migration_batches": 0, "sample_ai_runs": 3, "proof_steps_done": PROOF, "proof_complete": True, "mixed": True},
+], "total": 2, "summary": {"firms_in_sample_mode": 1, "firms_total": 2, "proof_complete": 1, "mixed": 1}, "proof_steps": PROOF, "limit": 100, "offset": 0}
+SAMPLE_EMPTY = {**SAMPLE, "items": [], "total": 0, "summary": {"firms_in_sample_mode": 0, "firms_total": 0, "proof_complete": 0, "mixed": 0}}
+
+
+def _job(n, firm_n, firm, kind, source, status, size_mb, src, staged, files, exc, **kw):
+    base = {"id": uid(1600 + n), "organization_id": uid(firm_n), "firm_name": firm, "kind": kind, "source_system": source, "status": status, "is_sample": False, "byte_size": int(size_mb * 1024 * 1024),
+            "source_row_count": src, "staged_row_count": staged, "attachment_files": files, "attachment_bytes": files * 180_000 if files else None,
+            "plan_counts": {"clients": src, "matters": staged // 2, "documents": files}, "result_counts": {}, "pilot_counts": {}, "exception_count": exc, "pilot_size": None,
+            "verified_at": None, "checked_at": None, "pilot_started_at": None, "pilot_completed_at": None, "pilot_signed_off_at": None, "full_run_started_at": None, "commit_started_at": None,
+            "committed_at": None, "commit_verified_at": None, "rolled_back_at": None, "discarded_at": None, "purge_after": iso(days=30), "staging_purged_at": None, "stuck": False, "purge_due": False,
+            "created_at": iso(days=-2), "updated_at": iso(minutes=-50)}
+    base.update(kw)
+    return base
+
+
+MIGRATION = {"items": [
+    _job(1, 3, "Harbourview Legal", "matters", "officio", "committing", 48, 1204, 1204, 312, 6, stuck=True, checked_at=iso(days=-1), pilot_size=50, pilot_started_at=iso(days=-1), pilot_completed_at=iso(days=-1), pilot_signed_off_at=iso(minutes=-200), commit_started_at=iso(minutes=-48), pilot_counts={"clients": 50, "matters": 25}),
+    _job(2, 1, "Northline Immigration", "clients", "csv", "checked", 2, 390, 388, 0, 2, checked_at=iso(days=-1), updated_at=iso(days=-1)),
+    _job(3, 5, "Maple Pathways", "clients", "csv", "committed", 0.1, 25, 25, 0, 0, is_sample=True, pilot_size=5, pilot_started_at=iso(days=-5), pilot_completed_at=iso(days=-5), pilot_signed_off_at=iso(days=-5), commit_started_at=iso(days=-5), committed_at=iso(days=-5), commit_verified_at=iso(days=-5), purge_after=iso(days=-1), purge_due=True, result_counts={"clients": 25, "matters": 12}, updated_at=iso(days=-5)),
+    _job(4, 6, "Lakeside Visa Services", "documents", "clio", "rolled_back", 12, 640, 640, 88, 0, rolled_back_at=iso(days=-12), updated_at=iso(days=-12), staging_purged_at=iso(days=-10)),
+], "total": 4, "summary": {"by_status": {"staged": 0, "checked": 1, "committing": 1, "committed": 1, "rolled_back": 1, "discarded": 0}, "stuck": 1, "purge_due": 1, "active": 2}, "stuck_after_minutes": 30, "limit": 50, "offset": 0}
+
+
+def admin_routes():
+    return {
+        "/config": CONFIG,
+        "/admins": ADMINS,
+        "POST /admins/invites": INVITE_OK,
+        "/audit": AUDIT,
+        "/privacy/requests": PRIVACY,
+        "/privacy/breaches": BREACHES,
+        "/sample-mode": SAMPLE,
+        "/migration/jobs": MIGRATION,
+    }
