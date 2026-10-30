@@ -9,6 +9,9 @@ page, with request/response shapes, rules and workflows, is **docs/FRONTEND-SPEC
 1. Route: unknown path `404 not_found`; known path, wrong method `405 method_not_allowed` + `Allow`.
 2. Gate: Cloudflare Access JWT (`cf-access-jwt-assertion`, re-verified), email on `ADMIN_ALLOWED_EMAILS`,
    Supabase auth user, `platform_admins` row (or an open invite, for the session endpoints only).
+   The first-admin Setup endpoints (`/setup*`) use the setup gate instead: Access + allow list + an
+   **empty** `platform_admins` table (`409 conflict`, `details.locked`, once it is not); see
+   docs/BOOTSTRAP.md.
 3. Mutations (POST/PATCH/PUT/DELETE): `Origin` must equal `ADMIN_ORIGIN` and `Content-Type` must be
    `application/json`, else `403 csrf_failed`.
 4. Role: GETs any role (owner, operator, viewer); mutations owner/operator; `/admins*` and
@@ -30,7 +33,8 @@ Overview `/overview*` · Firms `/firms*` · Subscriptions `/subscriptions/except
 Health `/health*` · Incidents `/incidents` + `/notices*` · Releases `/releases/*` + `/templates*` ·
 Config `/config*` (+ `/admins*` for owners) · Audit log `/audit` · Privacy `/privacy/*` ·
 Verification `/verification/summary` + `/licences/*` + `/firms/:id/verification` · Grants `/support/*` ·
-Sample mode `/sample-mode` · Migration `/migration/jobs` · plus `/session*` everywhere.
+Sample mode `/sample-mode` · Migration `/migration/jobs` · plus `/session*` everywhere · Setup
+`/setup*` (first admin only).
 
 Read-only stubs (no data source yet, response carries `stub: true` and a `gap` sentence):
 `GET /releases/app-notes`, `GET /privacy/breaches`, and `featureFlags` inside `GET /config`.
@@ -46,4 +50,6 @@ The full page-by-page frontend contract is `docs/FRONTEND-SPEC.md`.
 
 `tests/api-endpoints.test.ts` runs authz denial, validation and the happy path for every endpoint in the
 registry (and fails if an endpoint has no case); `tests/api-core.test.ts` covers the pipeline (routing,
-gate reasons, CSRF, session/step-up, reviewer flag, audit, error mapping, CSV import, helpers).
+gate reasons, CSRF, session/step-up, reviewer flag, audit, error mapping, CSV import, helpers);
+`tests/setup.test.ts` covers the setup gate and every `/setup*` endpoint (locked, lockout, passwords,
+factors, bootstrap call).

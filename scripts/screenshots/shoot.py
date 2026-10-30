@@ -97,6 +97,7 @@ def main():
                     elif kind == "eval":
                         page.evaluate(arg)
                 page.wait_for_timeout(300)
+                page.evaluate("document.querySelectorAll('nextjs-portal').forEach((n) => n.remove())")  # dev-only indicator
                 path = out / f"{sc['name']}-{w}.png"
                 page.screenshot(path=str(path), full_page=sc.get("full", True))
                 print(path)

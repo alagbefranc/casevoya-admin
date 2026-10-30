@@ -23,8 +23,22 @@ export type InviteeContext = AccessIdentity & {
   invite: { id: string; role: AdminRole; templateReviewer: boolean; expiresAt: string };
 };
 
+/**
+ * The caller of a first-admin Setup endpoint: a valid Access JWT for an allow-listed email while
+ * public.platform_admins is still empty. They may not have an auth user yet (userId null).
+ */
+export type SetupContext = AccessIdentity & {
+  userId: string | null;
+  env: AdminEnv;
+  db: SupabaseClient;
+  role: null;
+  templateReviewer: false;
+  setup: true;
+};
+
 export type GateReason =
   | "config"
+  | "setup_locked"
   | "no_access_jwt"
   | "bad_access_jwt"
   | "email_not_allowed"
@@ -33,7 +47,12 @@ export type GateReason =
   | "lookup_failed";
 
 export class AdminDenied extends Error {
-  constructor(readonly reason: GateReason, message: string) {
+  constructor(
+    readonly reason: GateReason,
+    message: string,
+    /** Safe, non-secret facts for the client (only the setup_locked refusal uses it). */
+    readonly details?: Record<string, unknown>,
+  ) {
     super(message);
   }
 }
@@ -96,11 +115,52 @@ export async function evaluateInviteeGate(
   return { ...identity, userId, env: deps.env, db, role: null, templateReviewer: false, invite };
 }
 
-async function identify(deps: GateDeps): Promise<{ identity: AccessIdentity; userId: string; db: SupabaseClient }> {
-  const verify = deps.verify ?? verifyAccessJwt;
-  let identity: AccessIdentity;
+/** How many platform admins exist, and when the first was added (service role). */
+export async function platformAdminCount(db: SupabaseClient): Promise<{ count: number; firstAt: string | null }> {
+  const { data, error, count } = await db
+    .from("platform_admins")
+    .select("created_at", { count: "exact" })
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (error) throw new AdminDenied("lookup_failed", `platform_admins count failed: ${error.message}`);
+  const rows = (data ?? []) as { created_at?: string | null }[];
+  return { count: count ?? rows.length, firstAt: rows[0]?.created_at ?? null };
+}
+
+export const SETUP_LOCKED_MESSAGE = "Setup is locked: the first platform admin already exists. Ask an owner to invite you.";
+
+/**
+ * The first-admin Setup gate, checked on the server for every setup request:
+ * 1. a valid Cloudflare Access JWT for an email on ADMIN_ALLOWED_EMAILS;
+ * 2. public.platform_admins is empty. Otherwise it refuses with setup_locked (409) for good.
+ * The auth user may not exist yet.
+ */
+export async function evaluateSetupGate(
+  deps: GateDeps & { countAdmins?: (db: SupabaseClient) => Promise<{ count: number; firstAt: string | null }> },
+): Promise<SetupContext> {
+  const identity = await verifyIdentity(deps);
+  const db = (deps.makeClient ?? serviceClient)(deps.env);
+  let admins: { count: number; firstAt: string | null };
   try {
-    identity = await verify(deps.token, {
+    admins = await (deps.countAdmins ?? platformAdminCount)(db);
+  } catch (error) {
+    if (error instanceof AdminDenied) throw error;
+    throw new AdminDenied("lookup_failed", "Could not check whether setup has been done");
+  }
+  if (admins.count > 0) throw new AdminDenied("setup_locked", SETUP_LOCKED_MESSAGE, { locked: true, lockedAt: admins.firstAt });
+  let userId: string | null;
+  try {
+    userId = await (deps.lookupUser ?? authUserIdByEmail)(deps.env, identity.email);
+  } catch {
+    throw new AdminDenied("lookup_failed", "Could not look up the admin's user record");
+  }
+  return { ...identity, userId, env: deps.env, db, role: null, templateReviewer: false, setup: true };
+}
+
+async function verifyIdentity(deps: GateDeps): Promise<AccessIdentity> {
+  const verify = deps.verify ?? verifyAccessJwt;
+  try {
+    return await verify(deps.token, {
       teamDomain: deps.env.accessTeamDomain,
       aud: deps.env.accessAud,
       allowedEmails: deps.env.allowedEmails,
@@ -109,6 +169,10 @@ async function identify(deps: GateDeps): Promise<{ identity: AccessIdentity; use
     if (error instanceof AccessDenied) throw new AdminDenied(error.reason, error.message);
     throw new AdminDenied("bad_access_jwt", "The Cloudflare Access token did not verify");
   }
+}
+
+async function identify(deps: GateDeps): Promise<{ identity: AccessIdentity; userId: string; db: SupabaseClient }> {
+  const identity = await verifyIdentity(deps);
   let userId: string | null;
   try {
     userId = await (deps.lookupUser ?? authUserIdByEmail)(deps.env, identity.email);
@@ -131,8 +195,8 @@ export async function requireAdmin(): Promise<AdminContext> {
   return evaluateGate({ token, env });
 }
 
-/** For the API: the admin gate, or the invitee gate (admins and people with an open invite). */
-export async function requireCaller(mode: "admin" | "invitee"): Promise<AdminContext | InviteeContext> {
+/** For the API: the admin gate, the invitee gate (admins and people with an open invite), or the first-admin setup gate. */
+export async function requireCaller(mode: "admin" | "invitee" | "setup"): Promise<AdminContext | InviteeContext | SetupContext> {
   let env: AdminEnv;
   try {
     env = readEnv();
@@ -140,6 +204,7 @@ export async function requireCaller(mode: "admin" | "invitee"): Promise<AdminCon
     throw new AdminDenied("config", error instanceof ConfigError ? error.message : "Configuration error");
   }
   const token = (await headers()).get(ACCESS_HEADER);
+  if (mode === "setup") return evaluateSetupGate({ token, env });
   return mode === "invitee" ? evaluateInviteeGate({ token, env }) : evaluateGate({ token, env });
 }
 

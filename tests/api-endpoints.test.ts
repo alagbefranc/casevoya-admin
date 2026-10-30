@@ -139,7 +139,8 @@ const CASES: Case[] = [
 
 describe("endpoint coverage", () => {
   it("has a case for every registered endpoint", () => {
-    const registered = ENDPOINTS.map((e) => `${e.method} ${e.path}`).sort();
+    // First-admin Setup endpoints have their own gate and are covered in tests/setup.test.ts.
+    const registered = ENDPOINTS.filter((e) => e.gate !== "setup").map((e) => `${e.method} ${e.path}`).sort();
     const covered = CASES.map((c) => `${c.method} ${c.path}`).sort();
     expect(covered).toEqual(registered);
   });

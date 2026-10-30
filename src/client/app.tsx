@@ -42,7 +42,10 @@ export function useAdmin(): Ctx {
 // ------------------------------------------------------------------ root
 
 export function AdminApp({ children }: { children: ReactNode }) {
-  const me = useApi<Me>("/session", { poll: 300 });
+  const pathname = usePathname() ?? "/";
+  // First-admin Setup has its own gate and screens (src/client/setup.tsx); the admin session is not loaded there.
+  const onSetup = pathname === "/setup" || pathname.startsWith("/setup/");
+  const me = useApi<Me>(onSetup ? null : "/session", { poll: 300 });
   const [accessEnded, setAccessEnded] = useState(false);
   useEffect(() => {
     const on = () => setAccessEnded(true);
@@ -51,11 +54,12 @@ export function AdminApp({ children }: { children: ReactNode }) {
   }, []);
 
   if (accessEnded) return <AccessEnded />;
+  if (onSetup) return <>{children}</>;
   if (!me.data) {
     if (me.error) {
       const e = me.error;
       if (e instanceof ApiFailure && (e.code === "unauthenticated" || e.code === "network")) return <AccessEnded network={e.code === "network"} />;
-      if (e instanceof ApiFailure && e.code === "forbidden") return <NoAccess message={e.message} />;
+      if (e instanceof ApiFailure && e.code === "forbidden") return <NoAccessOrSetup message={e.message} />;
       return <GateError error={e} onRetry={() => void me.reload()} />;
     }
     return <BootSkeleton slow={me.slow} onRetry={() => void me.reload()} />;
@@ -409,6 +413,21 @@ function BootSkeleton({ slow, onRetry }: { slow: boolean; onRetry: () => void })
       </div>
     </div>
   );
+}
+
+/**
+ * Not an admin: while no platform admin exists yet the allow-listed Access user is sent to /setup (the server
+ * decides via GET /setup: 200 = open). Otherwise, or if that check fails, "No access".
+ */
+function NoAccessOrSetup({ message }: { message: string }) {
+  const router = useRouter();
+  const setup = useApi<{ state: string }>("/setup");
+  const open = setup.data?.state === "open";
+  useEffect(() => {
+    if (open) router.replace("/setup");
+  }, [open, router]);
+  if (setup.loading || open) return <BootSkeleton slow={false} onRetry={() => void setup.reload()} />;
+  return <NoAccess message={message} />;
 }
 
 function NoAccess({ message }: { message: string }) {

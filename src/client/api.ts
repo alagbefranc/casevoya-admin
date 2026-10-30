@@ -14,6 +14,7 @@ export type ErrorCode =
   | "conflict"
   | "upstream_error"
   | "internal"
+  | "rate_limited"
   | "network";
 
 export type Issue = { path: string; message: string };

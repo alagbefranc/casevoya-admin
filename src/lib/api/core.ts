@@ -1,8 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import type { AdminContext, AdminRole, InviteeContext } from "../guard";
+import type { AdminContext, AdminRole, InviteeContext, SetupContext } from "../guard";
 import { AdminDenied } from "../guard";
 import type { SessionStatus } from "../session";
+import type { SetupApi } from "./modules/setup";
 import { ApiError, auditResultFor, fromDbError, zodDetails, type DbError, type ErrorCode } from "./errors";
 
 /**
@@ -10,31 +11,48 @@ import { ApiError, auditResultFor, fromDbError, zodDetails, type DbError, type E
  * input schema (zod), session needs and audit action. `handle` runs every request through the same steps:
  * Access + platform_admins gate → CSRF (mutations) → role → input validation → own-session / step-up pre-check →
  * handler → audit entry (mutations, including denied and failed attempts) → JSON.
+ * First-admin Setup endpoints (gate "setup") pass the setup gate instead: Access + allow list + an empty
+ * platform_admins table, re-checked on every request (409 for good once any admin exists).
  */
 
-export type Caller = AdminContext | InviteeContext;
+export type Caller = AdminContext | InviteeContext | SetupContext;
+/** Someone whose platform_admins row or open invite the gate found (session endpoints and the pre-check). */
+export type SessionCaller = AdminContext | InviteeContext;
+export type GateMode = "admin" | "invitee" | "setup";
 
 /** The admin's own Supabase session (see src/lib/session.ts). Injected so tests need no cookies or network. */
 export type SessionApi = {
-  status(caller: Caller): Promise<SessionStatus>;
-  signIn(caller: Caller, password: string, code: string): Promise<SessionStatus>;
-  stepUp(caller: Caller, code: string): Promise<SessionStatus>;
-  signOut(caller: Caller): Promise<void>;
-  client(caller: Caller, code?: string | null): Promise<{ client: SupabaseClient; status: SessionStatus }>;
+  status(caller: SessionCaller): Promise<SessionStatus>;
+  signIn(caller: SessionCaller, password: string, code: string): Promise<SessionStatus>;
+  stepUp(caller: SessionCaller, code: string): Promise<SessionStatus>;
+  signOut(caller: SessionCaller): Promise<void>;
+  client(caller: SessionCaller, code?: string | null): Promise<{ client: SupabaseClient; status: SessionStatus }>;
 };
 
 export type ApiDeps = {
-  gate(mode: "admin" | "invitee"): Promise<Caller>;
+  gate(mode: GateMode): Promise<Caller>;
   sessions: SessionApi;
+  /** First-admin Setup operations (src/lib/setup.ts). Only the setup endpoints use it. */
+  setup?: SetupApi;
   nowSeconds?: () => number;
   requestId?: () => string;
   log?: (message: string, extra?: Record<string, unknown>) => void;
 };
 
-export type AuditTarget = { table?: string | null; objectId?: string | null; organizationId?: string | null; context?: Record<string, unknown> };
+export type AuditTarget = {
+  table?: string | null;
+  objectId?: string | null;
+  organizationId?: string | null;
+  context?: Record<string, unknown>;
+  /** Overrides the actor (Setup learns the user id during the request; null before the account exists). */
+  actorId?: string | null;
+};
 
 export type HandlerCtx<I> = {
-  caller: Caller;
+  /** The admin or invitee. For setup endpoints use `setupCaller` (this is then the same object, untyped for setup). */
+  caller: SessionCaller;
+  /** The first-admin Setup caller (gate "setup" only), else null. */
+  setupCaller: SetupContext | null;
   admin: AdminContext;
   /** Service-role client. Only for reads and service-role functions. */
   db: SupabaseClient;
@@ -45,6 +63,8 @@ export type HandlerCtx<I> = {
   userClient(): Promise<SupabaseClient>;
   /** What the audit entry names. Handlers fill it in as they learn it. */
   audit: AuditTarget;
+  /** The API's logger. Never pass passwords, codes, tokens or TOTP secrets. */
+  log: (message: string, extra?: Record<string, unknown>) => void;
 };
 
 export type SessionNeed = "none" | "required" | "step_up";
@@ -54,8 +74,8 @@ export type Endpoint<I = unknown> = {
   path: string;
   summary: string;
   roles: readonly AdminRole[];
-  /** "invitee" also admits someone with an open invite (accept-invite flow). */
-  gate?: "admin" | "invitee";
+  /** "invitee" also admits someone with an open invite (accept-invite flow); "setup" is the first-admin Setup gate. */
+  gate?: GateMode;
   input: z.ZodType<I>;
   session?: SessionNeed;
   /** Requires platform_admins.template_reviewer (pre-check; the database re-checks). */
@@ -140,6 +160,7 @@ const GATE_STATUS: Record<string, ErrorCode> = {
   not_platform_admin: "forbidden",
   config: "internal",
   lookup_failed: "upstream_error",
+  setup_locked: "conflict",
 };
 
 function sessionErrorToApi(error: { kind: string; message: string }): ApiError {
@@ -198,7 +219,7 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
   try {
     caller = await deps.gate(endpoint.gate ?? "admin");
   } catch (error) {
-    if (error instanceof AdminDenied) return errorResponse(new ApiError(GATE_STATUS[error.reason] ?? "forbidden", error.message), requestId);
+    if (error instanceof AdminDenied) return errorResponse(new ApiError(GATE_STATUS[error.reason] ?? "forbidden", error.message, error.details), requestId);
     log("admin api gate failed", { requestId });
     return errorResponse(new ApiError("internal", "Unexpected error while checking access"), requestId);
   }
@@ -207,7 +228,7 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
   const finishAudit = async (result: "success" | "denied" | "failure", errorCode?: string) => {
     if (!mutation || !endpoint.audit) return;
     const { error } = await caller.db.rpc("platform_admin_record_audit", {
-      p_actor: caller.userId,
+      p_actor: audit.actorId !== undefined ? audit.actorId : caller.userId,
       p_action: `admin_portal.${endpoint.audit.action}`,
       p_object_table: audit.table ?? null,
       p_object_id: audit.objectId && UUID_RE.test(audit.objectId) ? audit.objectId : null,
@@ -230,8 +251,9 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
     if (!/^application\/json\b/i.test(type)) return fail(new ApiError("csrf_failed", "Send a JSON body (content-type: application/json)"));
   }
 
-  // 3. Role.
-  if (caller.role === null ? endpoint.gate !== "invitee" : !endpoint.roles.includes(caller.role)) {
+  // 3. Role. (Setup callers are never admins: the setup gate refuses once platform_admins has a row.)
+  const mode = endpoint.gate ?? "admin";
+  if ("setup" in caller ? mode !== "setup" : caller.role === null ? mode !== "invitee" : mode === "setup" || !endpoint.roles.includes(caller.role)) {
     return fail(new ApiError("forbidden", caller.role ? `Your platform role (${caller.role}) cannot do this` : "Accept your invite first"));
   }
   if (endpoint.reviewer && !caller.templateReviewer) return fail(new ApiError("forbidden", "You are not flagged as a template reviewer"));
@@ -262,6 +284,7 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
   // 5. Own session / step-up pre-check (the database re-checks).
   const need = endpoint.session ?? "none";
   if (need !== "none") {
+    if ("setup" in caller) return fail(new ApiError("internal", "Setup endpoints check their own session"));
     const status = await deps.sessions.status(caller);
     if (!status.signedIn) return fail(new ApiError("session_required", "Sign in with your password and authenticator code first"));
     if (!status.matchesAccessUser) return fail(new ApiError("session_required", "Your admin session belongs to a different user; sign in again"));
@@ -275,14 +298,19 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
   // 6. Handler.
   try {
     const ctx: HandlerCtx<unknown> = {
-      caller,
+      caller: caller as SessionCaller,
+      setupCaller: "setup" in caller ? caller : null,
       admin: caller as AdminContext,
       db: caller.db,
       input: parsed.data,
       requestId,
       deps,
       audit,
-      userClient: async () => (await deps.sessions.client(caller, code)).client,
+      log,
+      userClient: async () => {
+        if ("setup" in caller) throw new ApiError("internal", "Setup endpoints have no admin session client");
+        return (await deps.sessions.client(caller, code)).client;
+      },
     };
     const data = await endpoint.handler(ctx);
     await finishAudit("success");

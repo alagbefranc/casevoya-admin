@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { InviteeContext } from "../../guard";
 import { ALL_ROLES, defineEndpoint, rpc, type Caller } from "../core";
 import { ApiError } from "../errors";
 import { code, empty } from "../schemas";
@@ -42,7 +43,7 @@ export const sessionEndpoints = [
         templateReviewer: caller.templateReviewer,
         licensed,
         verifiedFactors,
-        invite: caller.role === null ? (caller as Extract<Caller, { role: null }>).invite : null,
+        invite: caller.role === null ? (caller as InviteeContext).invite : null,
         session,
         capabilities: capabilities(caller, licensed, Boolean(caller.env.supabasePublishableKey)),
         environment: { supabaseUrl: caller.env.supabaseUrl, adminOrigin: caller.env.adminOrigin },

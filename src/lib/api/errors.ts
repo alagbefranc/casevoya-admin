@@ -11,6 +11,7 @@ export const ERROR_STATUS = {
   not_found: 404,
   method_not_allowed: 405,
   conflict: 409,
+  rate_limited: 429,
   upstream_error: 502,
   internal: 500,
 } as const;
@@ -58,5 +59,5 @@ export function fromDbError(error: DbError): ApiError {
 }
 
 export function auditResultFor(error: ApiError): "denied" | "failure" {
-  return ["forbidden", "step_up_required", "session_required", "csrf_failed", "unauthenticated"].includes(error.code) ? "denied" : "failure";
+  return ["forbidden", "step_up_required", "session_required", "csrf_failed", "unauthenticated", "rate_limited"].includes(error.code) ? "denied" : "failure";
 }
