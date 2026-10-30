@@ -6,7 +6,7 @@ import { ApiFailure, api } from "./api";
 import { useAdmin } from "./app";
 import { refreshAll } from "./hooks";
 import { splitIssues } from "./session-rules";
-import { Alert, Drawer, ErrorAlert, Field, TextArea } from "@/components/ui";
+import { ErrorSummary, Alert, Drawer, ErrorAlert, Field, TextArea } from "@/components/ui";
 
 export type Body = { title: string; summary: string | null; items: string[] };
 export type Source = { position: number; url: string; host: string; official: boolean; title: string | null; retrieved_on: string | null; note: string | null };
@@ -85,6 +85,7 @@ export function DraftForm({ revise, startKey, onClose }: { revise: VersionDetail
       </>
     }>
       <form id="draft-form" className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <ErrorSummary issues={issues} ids={{ stableKey: "d-key", authorName: "d-author", title: "d-title", summary: "d-summary", items: "d-items", testEvidence: "d-evidence", effectiveOn: "d-eff", changelog: "d-change" }} />
         {!revise ? (
           <div className="row2">
             <Field id="d-key" label="Template key" hint="Lower case, digits and _. A new key creates a template." error={err("stableKey") ?? (stableKey && !KEY_RE.test(stableKey) ? "Use a-z, 0-9 and _, starting with a letter (2–61)." : null)}>
@@ -123,7 +124,6 @@ export function DraftForm({ revise, startKey, onClose }: { revise: VersionDetail
           {sources.length < 20 ? <button type="button" className="btn sm" style={{ marginTop: 8 }} onClick={() => setSources((rows) => [...rows, { url: "", title: "", retrievedOn: "", note: "" }])}><Plus className="ic" aria-hidden />Add source</button> : null}
           {err("sources") ? <span className="err">{err("sources")}</span> : null}
         </fieldset>
-        {issues?.summary.length ? <div className="summary" role="alert"><b>Check the form</b>{issues.summary.join(" ")}</div> : null}
         {error && !issues ? (error instanceof ApiFailure && ["conflict", "forbidden", "not_found"].includes(error.code) ? <Alert tone="bad" title={error.message} /> : <ErrorAlert error={error} />) : null}
       </form>
     </Drawer>

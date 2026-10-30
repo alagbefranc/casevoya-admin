@@ -7,7 +7,7 @@ import { num, short, when, words } from "./format";
 import { fromLocalInput, toLocalInput } from "./notices";
 import { CSV_MAX_BYTES, REGISTER_HOST, isRegisterUrl, previewResult } from "./licence-rules";
 import { splitIssues, stepUpNeed } from "./session-rules";
-import { Alert, Badge, CodeInput, Dialog, Drawer, ErrorAlert, Field, TextArea, statusLabel, statusTone } from "@/components/ui";
+import { ErrorSummary, Alert, Badge, CodeInput, Dialog, Drawer, ErrorAlert, Field, TextArea, statusLabel, statusTone } from "@/components/ui";
 
 export type Credential = {
   id: string; organization_id: string; firm_name: string; licence_type: string; college_id: string; status: string; register_status: string | null;
@@ -78,6 +78,7 @@ export function ManualCheckDrawer({ credential, onClose }: { credential: Credent
       </>
     }>
       <form id="check-form" className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <ErrorSummary issues={issues} ids={{ sourceUrl: "c-url", retrievedAt: "c-at", registerStatus: "c-reg", restrictionDetail: "c-detail", proofLocator: "c-proof", notes: "c-notes", code: "c-code" }} />
         <p className="muted" style={{ margin: 0 }}>Look up <span className="mono">{credential.college_id}</span> on <a href={registerSearch} target="_blank" rel="noreferrer noopener">{REGISTER_HOST}</a> and record what it shows.</p>
         <Field id="c-url" label="Register page link" hint={`https on ${REGISTER_HOST} only.`} error={err("sourceUrl") ?? (urlBad ? `Licence evidence must cite https://${REGISTER_HOST}` : null)}>
           <input id="c-url" className="inp" type="url" inputMode="url" placeholder={`https://${REGISTER_HOST}/…`} value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} />
@@ -109,7 +110,6 @@ export function ManualCheckDrawer({ credential, onClose }: { credential: Credent
             {result === "verified" ? "Next review is set from the licence re-check interval in Config." : "An adverse result tells the firm and can restrict it if no verified licence is left."}
           </Alert>
         ) : null}
-        {issues?.summary.length ? <div className="summary" role="alert"><b>Check the form</b>{issues.summary.join(" ")}</div> : null}
         {error && !issues ? <ErrorAlert error={error} /> : null}
       </form>
     </Drawer>

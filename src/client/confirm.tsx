@@ -4,7 +4,7 @@ import { ApiFailure } from "./api";
 import { useAdmin } from "./app";
 import { refreshAll } from "./hooks";
 import { splitIssues, stepUpNeed } from "./session-rules";
-import { Alert, CodeInput, Dialog, ErrorAlert, Field, TextArea } from "@/components/ui";
+import { ErrorSummary, Alert, CodeInput, Dialog, ErrorAlert, Field, TextArea } from "@/components/ui";
 
 export type ConfirmValues = { reason: string; code?: string; typed: string };
 
@@ -66,6 +66,7 @@ export function ConfirmDialog({
       </>
     }>
       <form id="confirm-form" className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <ErrorSummary issues={issues} ids={{ reason: "cf-reason", confirmEmail: "cf-typed", code: "cf-code" }} />
         {children}
         {extra}
         {reason ? (
@@ -82,7 +83,6 @@ export function ConfirmDialog({
             <CodeInput id="cf-code" value={code} onChange={setCode} error={issues?.byField.code ?? null} />
           </div>
         ) : null}
-        {issues?.summary.length ? <div className="summary" role="alert"><b>Check the form</b>{issues.summary.join(" ")}</div> : null}
         {error && !issues ? (
           error instanceof ApiFailure && ["conflict", "forbidden", "not_found", "session_required", "step_up_required"].includes(error.code)
             ? <Alert tone="bad" title={error.message} />

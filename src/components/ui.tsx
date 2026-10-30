@@ -564,3 +564,29 @@ export function Timeline({ items }: { items: { key: string; at: string | null; t
     </ol>
   );
 }
+
+/**
+ * Error summary at the top of a form (spec 1.8 / 1.4): every field error, linked to its field, then any
+ * issue that matched no field (database messages). Focused when it appears so screen readers announce it.
+ */
+export function ErrorSummary({ issues, ids, title }: { issues: { byField: Record<string, string>; summary: string[] } | null; ids: Record<string, string>; title?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const fieldErrors = issues ? Object.entries(issues.byField) : [];
+  const count = fieldErrors.length + (issues?.summary.length ?? 0);
+  const key = issues ? JSON.stringify(issues) : "";
+  useEffect(() => {
+    if (key && count) ref.current?.focus();
+  }, [key, count]);
+  if (!issues || !count) return null;
+  return (
+    <div className="summary" role="alert" tabIndex={-1} ref={ref}>
+      <b>{title ?? (count === 1 ? "Fix 1 problem to continue" : `Fix ${count} problems to continue`)}</b>
+      <ul>
+        {fieldErrors.map(([field, message]) => (
+          <li key={field}>{ids[field] ? <a href={`#${ids[field]}`} onClick={(e) => { e.preventDefault(); document.getElementById(ids[field])?.focus(); }}>{message}</a> : message}</li>
+        ))}
+        {issues.summary.map((m) => <li key={m}>{m}</li>)}
+      </ul>
+    </div>
+  );
+}

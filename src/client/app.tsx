@@ -10,7 +10,7 @@ import { NAV, activeNav } from "./nav";
 import { RoleContext } from "./role";
 import type { Me, Overview, SessionStatus } from "./types";
 import { when } from "./format";
-import { Alert, CodeInput, Dialog, ErrorAlert, Field, OfflineBanner, RequestIdNote, Skeleton, Toasts } from "@/components/ui";
+import { ErrorSummary, Alert, CodeInput, Dialog, ErrorAlert, Field, OfflineBanner, RequestIdNote, Skeleton, Toasts } from "@/components/ui";
 
 // ------------------------------------------------------------------ context
 
@@ -326,6 +326,7 @@ function SignInDialog({ email, onDone }: { email: string; onDone: (ok: boolean) 
       </>
     }>
       <form id="signin-form" className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <ErrorSummary issues={issues} ids={{ password: "si-password", code: "si-code" }} />
         <p>Use the password and authenticator app for your Access email.</p>
         <Field id="si-email" label="Access email" hint="This is the email Cloudflare Access signed you in with.">
           <input id="si-email" className="inp" value={email} readOnly aria-readonly style={{ background: "var(--paper)" }} />
@@ -334,7 +335,6 @@ function SignInDialog({ email, onDone }: { email: string; onDone: (ok: boolean) 
           <input id="si-password" className="inp" type="password" autoComplete="current-password" maxLength={200} value={password} onChange={(e) => setPassword(e.target.value)} data-autofocus />
         </Field>
         <CodeInput id="si-code" label="6-digit code" value={code} onChange={setCode} error={issues?.byField.code ? "That authenticator code was not accepted." : null} />
-        {issues?.summary.length ? <div className="summary" role="alert"><b>Check the form</b>{issues.summary.join(" ")}</div> : null}
         {other instanceof ApiFailure && other.code === "forbidden" ? (
           <Alert tone="bad" title="No authenticator app">{other.message}. <a href="https://app.casevoya.ca">Set one up in Casevoya (Settings › Security)</a>.</Alert>
         ) : other ? <ErrorAlert error={other} /> : null}

@@ -7,7 +7,7 @@ import { FirmPicker, type PickedFirm } from "./firm-picker";
 import { refreshAll, useApi } from "./hooks";
 import { splitIssues } from "./session-rules";
 import { duration, plural, when, words } from "./format";
-import { Alert, Badge, Drawer, ErrorAlert, Field, NotBuilt, Section, SkeletonRows, Status, TextArea, Timeline, type Tone } from "@/components/ui";
+import { ErrorSummary, Alert, Badge, Drawer, ErrorAlert, Field, NotBuilt, Section, SkeletonRows, Status, TextArea, Timeline, type Tone } from "@/components/ui";
 
 export type Notice = {
   id: string; kind: string; severity: string; title: string; body: string; starts_at: string | null; ends_at: string | null; status: string; audience: string;
@@ -176,6 +176,7 @@ export function NoticeForm({ editing, prefillFirm, onClose }: { editing: Notice 
         </>
       }>
         <form className="form" onSubmit={(e) => e.preventDefault()}>
+          <ErrorSummary issues={issues} ids={{ title: "n-title", body: "n-body", startsAt: "n-start", endsAt: "n-end", organizationIds: "n-firms" }} />
           {!editing ? (
             <fieldset className="fld" style={{ border: 0, padding: 0, margin: 0 }}>
               <legend style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Kind</legend>
@@ -212,7 +213,6 @@ export function NoticeForm({ editing, prefillFirm, onClose }: { editing: Notice 
           ) : null}
           {localProblem && (title || body) ? <p className="muted" style={{ margin: 0, color: "var(--warn)" }}>{localProblem}</p> : null}
           <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>No email is sent for notices. Firms see them in Casevoya&apos;s service banner during the window.</p>
-          {issues?.summary.length ? <div className="summary" role="alert"><b>Check the form</b>{issues.summary.join(" ")}</div> : null}
           {error && !issues ? (error instanceof ApiFailure && ["conflict", "forbidden", "not_found"].includes(error.code) ? <Alert tone="bad" title={error.message} /> : <ErrorAlert error={error} />) : null}
         </form>
       </Drawer>

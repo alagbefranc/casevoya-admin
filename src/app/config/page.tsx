@@ -8,7 +8,7 @@ import { formatSetting, type SettingValue } from "@/client/settings";
 import { refreshAll, useApi, useQueryState } from "@/client/hooks";
 import { day } from "@/client/format";
 import { splitIssues, stepUpNeed } from "@/client/session-rules";
-import { Alert, Badge, CodeInput, DataTable, Drawer, ErrorAlert, Field, NotBuilt, PageHeader, Panel, Section, SkeletonRows, StubPanel, TextArea } from "@/components/ui";
+import { ErrorSummary, Alert, Badge, CodeInput, DataTable, Drawer, ErrorAlert, Field, NotBuilt, PageHeader, Panel, Section, SkeletonRows, StubPanel, TextArea } from "@/components/ui";
 
 type Setting = { key: string; value: SettingValue; description: string | null; pending_confirmation: boolean; created_at: string; updated_at: string | null; version: number; editable: boolean; allowed_units: string[] };
 type Switch = { key: string; enabled: boolean; description: string | null; editable: false };
@@ -104,6 +104,7 @@ function ChangeSetting({ setting, onClose }: { setting: Setting; onClose: () => 
       </>
     }>
       <form id="setting-form" className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <ErrorSummary issues={issues} ids={{ "value.count": "s-count", "value.unit": "s-unit", reason: "s-reason", code: "s-code" }} />
         <dl className="dl">
           <div><dt>Current value</dt><dd>{formatSetting(setting.value)}</dd></div>
           <div><dt>Version</dt><dd>{setting.version}</dd></div>
@@ -121,7 +122,6 @@ function ChangeSetting({ setting, onClose }: { setting: Setting; onClose: () => 
         {countOk && changed ? <Alert tone="info" title="Preview">{label}: {formatSetting(setting.value)} → {formatSetting({ unit, count: n })}. Applies at once to new work.</Alert> : null}
         <TextArea id="s-reason" label="Reason" hint="3 to 500 characters. Saved in the audit log." max={500} value={reason} onChange={setReason} error={issues?.byField.reason ?? null} />
         {inlineCode ? <div className="codebox-wrap"><p>Your last authenticator check is older than 15 minutes.</p><CodeInput id="s-code" value={code} onChange={setCode} error={issues?.byField.code ?? null} /></div> : null}
-        {issues?.summary.length ? <div className="summary" role="alert"><b>Check the form</b>{issues.summary.join(" ")}</div> : null}
         {error && !issues ? (error instanceof ApiFailure && ["conflict", "not_found", "forbidden"].includes(error.code) ? <Alert tone="bad" title={error.message} /> : <ErrorAlert error={error} />) : null}
       </form>
     </Drawer>

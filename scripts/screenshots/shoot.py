@@ -69,7 +69,8 @@ def main():
                 page = ctx.new_page()
                 routes = {**fx.base_routes(), **fx.ops_routes(), **fx.records_routes(), **fx.admin_routes()}
                 routes.update(sc.get("routes", {}))
-                page.route("**/api/admin/**", make_handler(routes, sc.get("errors", {})))
+                errs = dict(sc.get("errors", {}))
+                page.route("**/api/admin/**", make_handler(routes, errs))
                 if sc.get("offline"):
                     pass
                 page.goto(args.base + sc["url"], wait_until="domcontentloaded")
@@ -91,6 +92,8 @@ def main():
                     elif kind == "offline":
                         ctx.set_offline(True)
                         page.evaluate("window.dispatchEvent(new Event('offline'))")
+                    elif kind == "fail":
+                        errs[arg[0]] = arg[1]  # later requests to this route now fail (stale state)
                     elif kind == "eval":
                         page.evaluate(arg)
                 page.wait_for_timeout(300)
