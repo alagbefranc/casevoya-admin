@@ -36,6 +36,7 @@ export const healthEndpoints = [
     roles: OPERATORS,
     input: z.object({ id: uuid, reason: reason(8, 500), code: optionalCode }),
     session: "step_up",
+    auditRequired: true,
     audit: { action: "health.replay", table: "public.outbox_events" },
     async handler({ db, input, audit, userClient }) {
       const event = must(await rpc<EventDetail | null>(db, "platform_outbox_event", { p_event_id: input.id }), "Event");

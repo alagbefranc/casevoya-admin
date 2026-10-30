@@ -4,7 +4,7 @@ import type { AdminContext, AdminRole, InviteeContext, SetupContext } from "../g
 import { AdminDenied } from "../guard";
 import type { SessionStatus } from "../session";
 import type { SetupApi } from "./modules/setup";
-import { ApiError, auditResultFor, fromDbError, zodDetails, type DbError, type ErrorCode } from "./errors";
+import { ApiError, STEP_UP_MESSAGE, auditResultFor, fromDbError, redact, zodDetails, type DbError, type ErrorCode } from "./errors";
 
 /**
  * The /api/admin/* framework: one table of endpoint definitions, each with its method, path, allowed roles,
@@ -29,9 +29,21 @@ export type SessionApi = {
   client(caller: SessionCaller, code?: string | null): Promise<{ client: SupabaseClient; status: SessionStatus }>;
 };
 
+/** Wrong authenticator codes / sign-in passwords per admin (src/lib/lockout.ts). Injected so tests need no database. */
+export type AttemptStore = {
+  /** Bad attempts recorded for this admin since `sinceIso`. Throws when it cannot count (the request is then refused). */
+  recentBadAttempts(caller: SessionCaller, sinceIso: string): Promise<number>;
+};
+
+/** Wrong codes or passwords allowed per admin in the window before code-bearing requests are refused. */
+export const CODE_MAX_BAD_ATTEMPTS = 5;
+export const CODE_LOCKOUT_MINUTES = 15;
+
 export type ApiDeps = {
   gate(mode: GateMode): Promise<Caller>;
   sessions: SessionApi;
+  /** Attempt lockout for authenticator codes. When absent no lockout is applied (tests only; the route always sets it). */
+  attempts?: AttemptStore;
   /** First-admin Setup operations (src/lib/setup.ts). Only the setup endpoints use it. */
   setup?: SetupApi;
   nowSeconds?: () => number;
@@ -77,7 +89,15 @@ export type Endpoint<I = unknown> = {
   /** "invitee" also admits someone with an open invite (accept-invite flow); "setup" is the first-admin Setup gate. */
   gate?: GateMode;
   input: z.ZodType<I>;
-  session?: SessionNeed;
+  /** Static, or decided from the validated input (e.g. a dry run needs no step-up). */
+  session?: SessionNeed | ((input: I) => SessionNeed);
+  /**
+   * The handler writes with the service role. With session "step_up", the step-up is first proven to the
+   * database with the admin's own session (platform_step_up_check) instead of trusting the cookie pre-check.
+   */
+  serviceStepUp?: boolean;
+  /** High-risk action: a "started" audit row must be written before the handler runs, else nothing is done. */
+  auditRequired?: boolean | ((input: I) => boolean);
   /** Requires platform_admins.template_reviewer (pre-check; the database re-checks). */
   reviewer?: boolean;
   /** Every non-GET endpoint has one. Recorded as admin_portal.<action>. */
@@ -101,6 +121,15 @@ export async function rpc<T = unknown>(client: SupabaseClient, fn: string, args:
   const { data, error } = await client.rpc(fn, args);
   if (error) throw fromDbError(error as DbError);
   return data as T;
+}
+
+/**
+ * Proves a fresh step-up to the database with the admin's own session: platform_step_up_check raises 42501
+ * unless the session's user is an owner/operator with a recent second factor. Used before service-role writes.
+ */
+export async function proveStepUp(client: SupabaseClient, userId: string): Promise<void> {
+  const proof = (await rpc(client, "platform_step_up_check")) as { ok?: unknown; user_id?: unknown } | null;
+  if (!proof || proof.ok !== true || proof.user_id !== userId) throw new ApiError("step_up_required", STEP_UP_MESSAGE);
 }
 
 export function must<T>(value: T | null | undefined, what: string): T {
@@ -174,8 +203,11 @@ function sessionErrorToApi(error: { kind: string; message: string }): ApiError {
       return new ApiError("validation_failed", error.message, { issues: [{ path: error.kind === "bad_code" ? "code" : "password", message: error.message }] });
     case "no_factor":
       return new ApiError("forbidden", error.message);
-    default:
-      return new ApiError("upstream_error", error.message);
+    default: {
+      const out = new ApiError("upstream_error", "Admin sign-in is unavailable right now. Try again.");
+      out.internal = error.message;
+      return out;
+    }
   }
 }
 
@@ -214,32 +246,54 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
   const { endpoint, params } = found;
   const mutation = endpoint.method !== "GET";
 
-  // 1. Access JWT + platform_admins (or an open invite for invitee endpoints).
+  const endpointName = `${endpoint.method} ${endpoint.path}`;
+  const nowSeconds = () => deps.nowSeconds?.() ?? Math.floor(Date.now() / 1000);
+
+  // 1. Access JWT + platform_admins (or an open invite for invitee endpoints). Refusals are logged (no secrets).
   let caller: Caller;
   try {
     caller = await deps.gate(endpoint.gate ?? "admin");
   } catch (error) {
-    if (error instanceof AdminDenied) return errorResponse(new ApiError(GATE_STATUS[error.reason] ?? "forbidden", error.message, error.details), requestId);
-    log("admin api gate failed", { requestId });
+    if (error instanceof AdminDenied) {
+      const internal = error.reason === "config" || error.reason === "lookup_failed";
+      log("admin api gate refused", { requestId, endpoint: endpointName, reason: error.reason, ...(internal ? { detail: redact(error.message) } : {}) });
+      const message = error.reason === "config" ? "The admin portal is not configured correctly. Check the Worker log." : error.reason === "lookup_failed" ? "Could not check your access. Try again." : error.message;
+      return errorResponse(new ApiError(GATE_STATUS[error.reason] ?? "forbidden", message, error.details), requestId);
+    }
+    log("admin api gate failed", { requestId, endpoint: endpointName, error: redact(error instanceof Error ? error.message : String(error)) });
     return errorResponse(new ApiError("internal", "Unexpected error while checking access"), requestId);
   }
 
   const audit: AuditTarget = { table: endpoint.audit?.table ?? null };
-  const finishAudit = async (result: "success" | "denied" | "failure", errorCode?: string) => {
-    if (!mutation || !endpoint.audit) return;
+  /** True once a high-risk action's "started" row is written: the outcome row is then retried if it fails. */
+  let highRisk = false;
+  const writeAudit = async (action: string, result: "success" | "denied" | "failure", extra: Record<string, unknown>): Promise<boolean> => {
     const { error } = await caller.db.rpc("platform_admin_record_audit", {
       p_actor: audit.actorId !== undefined ? audit.actorId : caller.userId,
-      p_action: `admin_portal.${endpoint.audit.action}`,
+      p_action: action,
       p_object_table: audit.table ?? null,
       p_object_id: audit.objectId && UUID_RE.test(audit.objectId) ? audit.objectId : null,
       p_organization_id: audit.organizationId && UUID_RE.test(audit.organizationId) ? audit.organizationId : null,
       p_result: result,
-      p_context: { request_id: requestId, endpoint: `${endpoint.method} ${endpoint.path}`, ...(errorCode ? { error_code: errorCode } : {}), ...(audit.context ?? {}) },
+      p_context: { request_id: requestId, endpoint: endpointName, ...extra, ...(audit.context ?? {}) },
     });
-    if (error) log("admin api audit write failed", { requestId, action: endpoint.audit.action, error: error.message });
+    if (error) log("admin api audit write failed", { requestId, action, error: redact(error.message) });
+    return !error;
+  };
+  const finishAudit = async (result: "success" | "denied" | "failure", errorCode?: string) => {
+    if (!mutation || !endpoint.audit) return;
+    const action = `admin_portal.${endpoint.audit.action}`;
+    const extra = errorCode ? { error_code: errorCode } : {};
+    if (await writeAudit(action, result, extra)) return;
+    if (highRisk && !(await writeAudit(action, result, extra))) {
+      log("admin api audit outcome missing for a high-risk action (the started entry exists)", { requestId, action, result, alert: "audit_gap" });
+    }
   };
   const fail = async (error: ApiError) => {
-    await finishAudit(auditResultFor(error), error.code);
+    if (error.internal) log("admin api upstream error", { requestId, endpoint: endpointName, code: error.code, detail: redact(error.internal) });
+    const result = auditResultFor(error);
+    if (result === "denied") log("admin api request refused", { requestId, endpoint: endpointName, code: error.code, role: caller.role ?? null });
+    await finishAudit(result, error.code);
     return errorResponse(error, requestId);
   };
 
@@ -281,22 +335,55 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
   const input = parsed.data as Record<string, unknown> | undefined;
   const code = input && typeof input.code === "string" ? input.code : null;
 
-  // 5. Own session / step-up pre-check (the database re-checks).
-  const need = endpoint.session ?? "none";
+  // 4b. Attempt lockout: a request carrying an authenticator code is refused after too many recent wrong codes or
+  // passwords for this admin (Setup has its own lockout). Fails closed when the count cannot be read.
+  if (code && !("setup" in caller) && deps.attempts) {
+    const since = new Date((nowSeconds() - CODE_LOCKOUT_MINUTES * 60) * 1000).toISOString();
+    let bad: number;
+    try {
+      bad = await deps.attempts.recentBadAttempts(caller, since);
+    } catch (error) {
+      log("admin api attempt count failed", { requestId, endpoint: endpointName, error: redact(error instanceof Error ? error.message : String(error)) });
+      return fail(new ApiError("upstream_error", "Could not check recent code attempts, so the code was not tried. Try again."));
+    }
+    if (bad >= CODE_MAX_BAD_ATTEMPTS) {
+      return fail(new ApiError("rate_limited", `Too many wrong codes or passwords. Wait ${CODE_LOCKOUT_MINUTES} minutes, then try again.`, { retryAfterMinutes: CODE_LOCKOUT_MINUTES }));
+    }
+  }
+
+  // 5. Own session / step-up pre-check. The cookie is not trusted on its own: user-session functions re-check in
+  // the database, and service-role writes (serviceStepUp) prove the step-up with platform_step_up_check below.
+  const need: SessionNeed = typeof endpoint.session === "function" ? endpoint.session(parsed.data) : (endpoint.session ?? "none");
   if (need !== "none") {
     if ("setup" in caller) return fail(new ApiError("internal", "Setup endpoints check their own session"));
     const status = await deps.sessions.status(caller);
     if (!status.signedIn) return fail(new ApiError("session_required", "Sign in with your password and authenticator code first"));
     if (!status.matchesAccessUser) return fail(new ApiError("session_required", "Your admin session belongs to a different user; sign in again"));
     if (need === "step_up" && !code) {
-      const now = deps.nowSeconds?.() ?? Math.floor(Date.now() / 1000);
+      const now = nowSeconds();
       const fresh = status.aal === "aal2" && status.stepUpFreshUntil != null && status.stepUpFreshUntil > now + 5;
-      if (!fresh) return fail(new ApiError("step_up_required", "Enter a fresh authenticator code (step-up lasts 15 minutes)"));
+      if (!fresh) return fail(new ApiError("step_up_required", STEP_UP_MESSAGE));
     }
   }
 
-  // 6. Handler.
+  // 5b. High-risk actions: the "started" audit entry must be written before anything changes.
+  const auditRequired = typeof endpoint.auditRequired === "function" ? endpoint.auditRequired(parsed.data) : Boolean(endpoint.auditRequired);
+  if (mutation && endpoint.audit && auditRequired) {
+    if (!(await writeAudit(`admin_portal.${endpoint.audit.action}.started`, "success", { phase: "started" }))) {
+      return fail(new ApiError("upstream_error", "The audit log could not be written, so nothing was changed. Try again."));
+    }
+    highRisk = true;
+  }
+
+  // 6. Handler. The own-session client is created once per request (a code is verified at most once).
+  let own: Promise<SupabaseClient> | null = null;
+  const userClient = (): Promise<SupabaseClient> => {
+    if ("setup" in caller) return Promise.reject(new ApiError("internal", "Setup endpoints have no admin session client"));
+    own ??= deps.sessions.client(caller, code).then((r) => r.client);
+    return own;
+  };
   try {
+    if (need === "step_up" && endpoint.serviceStepUp) await proveStepUp(await userClient(), caller.userId as string);
     const ctx: HandlerCtx<unknown> = {
       caller: caller as SessionCaller,
       setupCaller: "setup" in caller ? caller : null,
@@ -307,18 +394,22 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
       deps,
       audit,
       log,
-      userClient: async () => {
-        if ("setup" in caller) throw new ApiError("internal", "Setup endpoints have no admin session client");
-        return (await deps.sessions.client(caller, code)).client;
-      },
+      userClient,
     };
     const data = await endpoint.handler(ctx);
     await finishAudit("success");
     return json({ data: data ?? null, requestId }, endpoint.status ?? 200, requestId);
   } catch (error) {
     if (error instanceof ApiError) return fail(error);
-    if (error && typeof error === "object" && "kind" in error && error instanceof Error) return fail(sessionErrorToApi(error as Error & { kind: string }));
-    log("admin api handler failed", { requestId, endpoint: `${endpoint.method} ${endpoint.path}`, error: error instanceof Error ? error.message : String(error) });
+    if (error && typeof error === "object" && "kind" in error && error instanceof Error) {
+      const kind = (error as Error & { kind: string }).kind;
+      // Marks the audit entry as a bad attempt (what the lockout counts). Never includes the value.
+      if ((kind === "bad_code" || kind === "bad_credentials") && !("setup" in caller)) {
+        audit.context = { ...(audit.context ?? {}), bad_attempt: kind === "bad_code" ? "code" : "password", attempt_user_id: caller.userId };
+      }
+      return fail(sessionErrorToApi(error as Error & { kind: string }));
+    }
+    log("admin api handler failed", { requestId, endpoint: endpointName, error: redact(error instanceof Error ? error.message : String(error)) });
     return fail(new ApiError("internal", "Unexpected error"));
   }
 }

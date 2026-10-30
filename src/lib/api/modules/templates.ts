@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ALL_ROLES, OPERATORS, defineEndpoint, must, rpc } from "../core";
-import { ApiError } from "../errors";
+import { ApiError, fromDbError } from "../errors";
 import { isoDate, optionalCode, reason, uuid } from "../schemas";
 import { sourcesForDb } from "../../templates";
 
@@ -50,7 +50,7 @@ type Submission = { status: string; submitted_at: string | null; submitted_by: s
 /** Review submission state (platform_template_version does not return it). Null when the version does not exist. */
 async function submissionOf(db: SupabaseClient, id: string): Promise<Submission | null> {
   const { data, error } = await db.from("shared_template_versions").select("status, submitted_at, submitted_by").eq("id", id).maybeSingle();
-  if (error) throw new ApiError("upstream_error", error.message);
+  if (error) throw fromDbError(error);
   return (data as Submission | null) ?? null;
 }
 
@@ -95,6 +95,8 @@ function withHints(detail: VersionDetail, userId: string, submission: Submission
   };
 }
 
+type DecisionInput = { id: string; code?: string; reason?: string; reviewHash?: string; confirmRollback?: true };
+
 const decision = (action: "approve" | "reject" | "rollback") =>
   defineEndpoint({
     method: "POST",
@@ -104,7 +106,7 @@ const decision = (action: "approve" | "reject" | "rollback") =>
         ? "Approve and publish a draft submitted for review, bound to the review hash shown with it. Template reviewer with a verified licence, own session, fresh step-up, not the author."
         : action === "reject"
           ? "Reject a draft with a reason. Same reviewer rules as approve."
-          : "Withdraw the published version and restore the one it replaced. Same reviewer rules.",
+          : "Withdraw the published version and restore the one it replaced. Same reviewer rules, plus an explicit confirmation and a reason.",
     roles: OPERATORS,
     reviewer: true,
     input:
@@ -114,16 +116,26 @@ const decision = (action: "approve" | "reject" | "rollback") =>
             code: optionalCode,
             confirmCompared: z.literal(true, { message: "Confirm you compared the draft with the published version and its sources" }),
             reviewHash: z.string().trim().toLowerCase().regex(REVIEW_HASH_RE, "Reload the version: the review fingerprint of what you reviewed is missing"),
-          }) as z.ZodType<{ id: string; code?: string; reason?: string; reviewHash?: string }>)
-        : (z.object({ id: uuid, code: optionalCode, reason: reason(3, 500) }) as z.ZodType<{ id: string; code?: string; reason?: string; reviewHash?: string }>),
+          }) as z.ZodType<DecisionInput>)
+        : action === "rollback"
+          ? (z.object({
+              id: uuid,
+              code: optionalCode,
+              reason: reason(3, 500),
+              confirmRollback: z.literal(true, { message: "Confirm you want to withdraw the published version" }),
+            }) as z.ZodType<DecisionInput>)
+          : (z.object({ id: uuid, code: optionalCode, reason: reason(3, 500) }) as z.ZodType<DecisionInput>),
     session: "step_up",
+    auditRequired: true,
     audit: { action: `templates.${action}`, table: "public.shared_template_versions" },
     async handler({ input, userClient, db, caller, audit }) {
-      const i = input as { id: string; reason?: string; reviewHash?: string };
-      if (action === "approve") {
-        // Only a draft its author submitted for review is approved from the portal.
+      const i = input as DecisionInput;
+      if (action === "approve" || action === "reject") {
+        // Only a draft its author submitted for review is approved or rejected from the portal.
         const submission = must(await submissionOf(db, i.id), "Template version");
         if (submission.status === "draft" && !submission.submitted_at) throw new ApiError("conflict", "The author has not submitted this draft for review yet");
+      }
+      if (action === "approve") {
         audit.context = { review_hash: i.reviewHash };
         const client = await userClient();
         let result: unknown;
@@ -185,7 +197,7 @@ export const templateEndpoints = [
     input: z.object({}).passthrough().transform(() => ({})),
     async handler({ db }) {
       const { data, error } = await db.from("official_source_domains").select("host, match_kind, authority").order("host").limit(500);
-      if (error) throw new ApiError("upstream_error", error.message);
+      if (error) throw fromDbError(error);
       return { items: data ?? [] };
     },
   }),

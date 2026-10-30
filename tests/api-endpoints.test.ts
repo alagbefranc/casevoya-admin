@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { handle } from "@/lib/api/core";
 import { ENDPOINTS } from "@/lib/api/registry";
 import { AdminDenied, type AdminRole } from "@/lib/guard";
-import { ID, ME, ORG, OTHER, auditCalls, deps, fakeDb, req } from "./api-helpers";
+import { ID, ME, ORG, OTHER, auditCalls, deps, fakeDb, outcomeAudits, req } from "./api-helpers";
 
 /**
  * One case per endpoint: an authorization denial, a validation failure and a happy path. Mutations also
@@ -60,6 +60,8 @@ const goodDraft = {
   sources: [{ url: "https://www.canada.ca/en/immigration-refugees-citizenship/services/study-canada.html" }],
 };
 const csv = "Licence Number,Name,Status\nR500001,Test Person,Active\nR500002,Other Person,Suspended\n";
+/** The database's proof of a fresh step-up for the caller (own session). */
+const stepUpOk = { platform_step_up_check: { ok: true, user_id: ME } };
 
 const reviseBody: Record<string, unknown> = { ...goodDraft };
 delete reviseBody.stableKey;
@@ -87,9 +89,9 @@ const CASES: Case[] = [
   { method: "GET", path: "/licences/queue", url: "/licences/queue?kind=adverse", bad: { url: "/licences/queue?kind=soon" }, deny: null, calls: "platform_licence_queue" },
   { method: "GET", path: "/licences/credentials/:id", url: `/licences/credentials/${ID}`, bad: { url: "/licences/credentials/1" }, deny: null, calls: "platform_credential_detail", rpcs: { platform_credential_detail: credential } },
   { method: "POST", path: "/licences/credentials/:id/checks", url: `/licences/credentials/${ID}/checks`, body: goodCheck, bad: { url: `/licences/credentials/${ID}/checks`, body: { ...goodCheck, sourceUrl: "https://example.com/x" } }, deny: "viewer", calls: "record_licence_check", on: "user", session: "fresh", rpcs: { platform_credential_detail: credential } },
-  { method: "POST", path: "/licences/credentials/:id/cicc-check", url: `/licences/credentials/${ID}/cicc-check`, body: {}, bad: { url: "/licences/credentials/nope/cicc-check", body: {} }, deny: "viewer", calls: "check_licence_against_cicc_list", rpcs: { platform_credential_detail: credential, check_licence_against_cicc_list: ID } },
+  { method: "POST", path: "/licences/credentials/:id/cicc-check", url: `/licences/credentials/${ID}/cicc-check`, body: {}, bad: { url: "/licences/credentials/nope/cicc-check", body: {} }, deny: "viewer", calls: "check_licence_against_cicc_list", session: "fresh", rpcs: { platform_credential_detail: credential, check_licence_against_cicc_list: ID, ...stepUpOk } },
   { method: "GET", path: "/licences/cicc-imports", url: "/licences/cicc-imports", bad: { url: "/licences/cicc-imports?limit=999" }, deny: null, calls: "platform_cicc_imports" },
-  { method: "POST", path: "/licences/cicc-imports", url: "/licences/cicc-imports", body: { sourceNote: "Downloaded from CICC", fileName: "list.csv", csv, dryRun: false }, bad: { url: "/licences/cicc-imports", body: { sourceNote: "", fileName: "x.csv", csv } }, deny: "viewer", calls: "finish_cicc_register_import", rpcs: { start_cicc_register_import: ID, import_cicc_register: 2, finish_cicc_register_import: { checked: 1 } } },
+  { method: "POST", path: "/licences/cicc-imports", url: "/licences/cicc-imports", body: { sourceNote: "Downloaded from CICC", fileName: "list.csv", csv, dryRun: false }, bad: { url: "/licences/cicc-imports", body: { sourceNote: "", fileName: "x.csv", csv } }, deny: "viewer", calls: "finish_cicc_register_import", session: "fresh", rpcs: { start_cicc_register_import: ID, import_cicc_register: 2, finish_cicc_register_import: { checked: 1 }, ...stepUpOk } },
   // support
   { method: "GET", path: "/support/requests", url: "/support/requests?state=active", bad: { url: "/support/requests?state=open" }, deny: null, calls: "platform_support_requests" },
   { method: "GET", path: "/support/requests/:id", url: `/support/requests/${ID}`, bad: { url: "/support/requests/zz" }, deny: null, calls: "platform_support_request_history", tables: { support_access_requests: [{ id: ID, organization_id: ORG, status: "pending" }] } },
@@ -116,8 +118,8 @@ const CASES: Case[] = [
   { method: "POST", path: "/templates/versions/:id/submit", url: `/templates/versions/${ID}/submit`, body: {}, bad: { url: "/templates/versions/1/submit", body: {} }, deny: "viewer", calls: "submit_shared_template_version", rpcs: { platform_template_version: version("draft", ME), submit_shared_template_version: { id: ID, review_hash: HASH } } },
   { method: "POST", path: "/templates/versions/:id/withdraw", url: `/templates/versions/${ID}/withdraw`, body: {}, bad: { url: "/templates/versions/1/withdraw", body: {} }, deny: "viewer", calls: "withdraw_shared_template_version", rpcs: { platform_template_version: version("draft", ME) }, tables: { shared_template_versions: [submitted] } },
   { method: "POST", path: "/templates/versions/:id/approve", url: `/templates/versions/${ID}/approve`, body: { confirmCompared: true, reviewHash: HASH, code: "123456" }, bad: { url: `/templates/versions/${ID}/approve`, body: { confirmCompared: false, reviewHash: HASH } }, deny: "viewer", calls: "approve_shared_template_version", on: "user", session: "fresh", reviewer: true, rpcs: { platform_template_version: version("published") }, tables: { shared_template_versions: [submitted] } },
-  { method: "POST", path: "/templates/versions/:id/reject", url: `/templates/versions/${ID}/reject`, body: { reason: "Missing the biometrics step" }, bad: { url: `/templates/versions/${ID}/reject`, body: { reason: "" } }, deny: "viewer", calls: "reject_shared_template_version", on: "user", session: "fresh", reviewer: true, rpcs: { platform_template_version: version("rejected") } },
-  { method: "POST", path: "/templates/versions/:id/rollback", url: `/templates/versions/${ID}/rollback`, body: { reason: "Wrong fee amount" }, bad: { url: `/templates/versions/${ID}/rollback`, body: {} }, deny: "viewer", calls: "rollback_shared_template_version", on: "user", session: "fresh", reviewer: true, rpcs: { platform_template_version: version("withdrawn") } },
+  { method: "POST", path: "/templates/versions/:id/reject", url: `/templates/versions/${ID}/reject`, body: { reason: "Missing the biometrics step" }, bad: { url: `/templates/versions/${ID}/reject`, body: { reason: "" } }, deny: "viewer", calls: "reject_shared_template_version", on: "user", session: "fresh", reviewer: true, rpcs: { platform_template_version: version("rejected") }, tables: { shared_template_versions: [submitted] } },
+  { method: "POST", path: "/templates/versions/:id/rollback", url: `/templates/versions/${ID}/rollback`, body: { reason: "Wrong fee amount", confirmRollback: true }, bad: { url: `/templates/versions/${ID}/rollback`, body: {} }, deny: "viewer", calls: "rollback_shared_template_version", on: "user", session: "fresh", reviewer: true, rpcs: { platform_template_version: version("withdrawn") } },
   // audit
   { method: "GET", path: "/audit", url: "/audit?actionPrefix=admin_portal.&limit=20", bad: { url: `/audit?beforeAt=2026-10-29T00:00:00Z` }, deny: null, calls: "platform_audit_log" },
   // admins
@@ -125,7 +127,7 @@ const CASES: Case[] = [
   { method: "POST", path: "/admins/invites", url: "/admins/invites", status: 201, body: { email: "new@mail.grokbot.com", role: "viewer" }, bad: { url: "/admins/invites", body: { email: "nope", role: "viewer" } }, deny: "operator", calls: "platform_admin_invite", on: "user", session: "fresh", rpcs: { platform_admin_invite: ID } },
   { method: "POST", path: "/admins/invites/:id/cancel", url: `/admins/invites/${ID}/cancel`, body: {}, bad: { url: "/admins/invites/x/cancel", body: {} }, deny: "operator", calls: "platform_admin_cancel_invite", on: "user", session: "fresh" },
   { method: "PATCH", path: "/admins/:id/role", url: `/admins/${OTHER}/role`, body: { role: "operator" }, bad: { url: `/admins/${OTHER}/role`, body: { role: "god" } }, deny: "operator", calls: "platform_admin_set_role", on: "user", session: "fresh" },
-  { method: "PATCH", path: "/admins/:id/reviewer", url: `/admins/${OTHER}/reviewer`, body: { templateReviewer: true }, bad: { url: `/admins/${OTHER}/reviewer`, body: { templateReviewer: "maybe" } }, deny: "operator", calls: "platform_admin_set_reviewer", on: "user", session: "fresh" },
+  { method: "PATCH", path: "/admins/:id/reviewer", url: `/admins/${OTHER}/reviewer`, body: { templateReviewer: true }, bad: { url: `/admins/${OTHER}/reviewer`, body: { templateReviewer: "maybe" } }, deny: "operator", calls: "platform_admin_set_reviewer", on: "user", session: "fresh", rpcs: { platform_admin_list: { admins: [{ user_id: OTHER, email: "ops@mail.grokbot.com", role: "operator", template_reviewer: false }] } } },
   { method: "POST", path: "/admins/:id/remove", url: `/admins/${OTHER}/remove`, body: { reason: "Left the team", confirmEmail: "ops@mail.grokbot.com" }, bad: { url: `/admins/${OTHER}/remove`, body: { reason: "x", confirmEmail: "ops@mail.grokbot.com" } }, deny: "operator", calls: "platform_admin_remove", on: "user", session: "fresh", rpcs: { platform_admin_list: { admins: [{ user_id: OTHER, email: "ops@mail.grokbot.com" }] } } },
   // Designer pages (Usage, Incidents, Releases, Config, Privacy, Verification, Sample mode, Migration).
   { method: "GET", path: "/usage", url: "/usage?flaggedOnly=true&sort=storage_desc", bad: { url: "/usage?sort=biggest" }, deny: null, calls: "platform_usage", rpcs: { platform_usage: { items: [], total: 0 } } },
@@ -147,6 +149,35 @@ describe("endpoint coverage", () => {
     const registered = ENDPOINTS.filter((e) => e.gate !== "setup").map((e) => `${e.method} ${e.path}`).sort();
     const covered = CASES.map((c) => `${c.method} ${c.path}`).sort();
     expect(covered).toEqual(registered);
+  });
+  it("proves the step-up to the database before every service-role step-up write", () => {
+    // A step-up endpoint either acts through the admin's own session (the database re-checks) or is serviceStepUp.
+    for (const c of CASES) {
+      const e = ENDPOINTS.find((x) => x.method === c.method && x.path === c.path)!;
+      const need = typeof e.session === "function" ? e.session({ ...(c.body ?? {}), dryRun: false }) : e.session;
+      if (need === "step_up" && c.on !== "user") expect(e.serviceStepUp, `${e.method} ${e.path}`).toBe(true);
+    }
+  });
+  it("marks the high-risk actions as needing their audit entry first", () => {
+    const required = ENDPOINTS.filter((e) => e.auditRequired).map((e) => `${e.method} ${e.path}`).sort();
+    expect(required).toEqual(
+      [
+        "POST /session/accept-invite",
+        "POST /licences/credentials/:id/checks",
+        "POST /licences/credentials/:id/cicc-check",
+        "POST /licences/cicc-imports",
+        "POST /health/dead-letters/:id/retry",
+        "POST /templates/versions/:id/approve",
+        "POST /templates/versions/:id/reject",
+        "POST /templates/versions/:id/rollback",
+        "POST /admins/invites",
+        "POST /admins/invites/:id/cancel",
+        "PATCH /admins/:id/role",
+        "PATCH /admins/:id/reviewer",
+        "POST /admins/:id/remove",
+        "PATCH /config/settings/:key",
+      ].sort(),
+    );
   });
   it("gives every mutation an audit action and every endpoint a summary", () => {
     for (const e of ENDPOINTS) {
@@ -201,11 +232,16 @@ describe.each(CASES)("$method $path", (c) => {
       if (c.on === "user") expect(d.db.calls.map((x) => x.fn)).not.toContain(c.calls);
     }
     if (mutation) {
-      const audit = auditCalls(d.db);
+      const audit = outcomeAudits(d.db);
       expect(audit).toHaveLength(1);
       expect(audit[0].args).toMatchObject({ p_actor: ME, p_result: "success" });
       expect(String(audit[0].args.p_action)).toMatch(/^admin_portal\./);
       expect((audit[0].args.p_context as Record<string, unknown>).request_id).toBe("req-1");
+      const endpoint = ENDPOINTS.find((e) => e.method === c.method && e.path === c.path)!;
+      const required = typeof endpoint.auditRequired === "function" ? endpoint.auditRequired(c.body) : Boolean(endpoint.auditRequired);
+      // High-risk actions write their "started" entry before anything else is called.
+      expect(auditCalls(d.db).length).toBe(required ? 2 : 1);
+      if (required) expect(d.db.calls[0]).toMatchObject({ fn: "platform_admin_record_audit", args: { p_action: `admin_portal.${endpoint.audit!.action}.started` } });
     } else {
       expect(auditCalls(d.db)).toHaveLength(0);
     }

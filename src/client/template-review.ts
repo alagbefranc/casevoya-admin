@@ -5,7 +5,7 @@ import { ApiFailure } from "./api";
  * The API and the database re-check every rule; this only decides what is shown.
  *
  * - The author (operator/owner) revises an open draft, submits it for review, or withdraws it from review.
- * - A flagged reviewer who is not the author approves a submitted draft (bound to its review hash) or rejects a draft.
+ * - A flagged reviewer who is not the author approves (bound to its review hash) or rejects a submitted draft.
  */
 export type ReviewView = {
   status: string;
@@ -38,7 +38,7 @@ export function reviewActions(v: ReviewView, me: { operate: boolean; reviewTempl
     canRevise: author && !v.inReview,
     canSubmit: author && !v.inReview,
     canWithdraw: author && v.inReview,
-    canReject: reviewer,
+    canReject: reviewer && v.inReview,
     canApprove: reviewer && v.inReview,
     approveBlocked: !v.hasOfficialSource ? "Add at least one official source" : !v.reviewHash ? "Reload the page to load what you are reviewing" : null,
     submitBlocked: !v.hasOfficialSource ? "Add at least one official source before submitting" : null,

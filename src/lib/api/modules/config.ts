@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ALL_ROLES, OWNERS, defineEndpoint, rpc } from "../core";
-import { ApiError } from "../errors";
+import { ApiError, fromDbError } from "../errors";
 import { optionalCode, reason } from "../schemas";
 
 export const FEATURE_FLAGS_GAP =
@@ -38,7 +38,7 @@ export const configEndpoints = [
     input: z.object({}),
     async handler({ db }) {
       const { data, error } = await db.from("product_settings").select(SETTING_COLUMNS).order("key");
-      if (error) throw new ApiError("upstream_error", error.message);
+      if (error) throw fromDbError(error);
       const settings = ((data ?? []) as SettingRow[]).map((s) => ({
         ...s,
         editable: isEditableSetting(s.value),
@@ -68,10 +68,11 @@ export const configEndpoints = [
       code: optionalCode,
     }),
     session: "step_up",
+    auditRequired: true,
     audit: { action: "config.setting_changed", table: "public.product_settings" },
     async handler({ db, input, audit, userClient }) {
       const { data: before, error } = await db.from("product_settings").select(SETTING_COLUMNS).eq("key", input.key).maybeSingle();
-      if (error) throw new ApiError("upstream_error", error.message);
+      if (error) throw fromDbError(error);
       if (!before) throw new ApiError("not_found", "Setting not found");
       if (!isEditableSetting((before as SettingRow).value)) throw new ApiError("conflict", NOT_EDITABLE);
       if (!allowedUnits(input.key).includes(input.value.unit)) {
@@ -82,7 +83,7 @@ export const configEndpoints = [
       const client = await userClient();
       await rpc(client, "set_product_setting", { p_key: input.key, p_value: input.value });
       const { data: after, error: afterError } = await db.from("product_settings").select(SETTING_COLUMNS).eq("key", input.key).maybeSingle();
-      if (afterError) throw new ApiError("upstream_error", afterError.message);
+      if (afterError) throw fromDbError(afterError);
       return after;
     },
   }),

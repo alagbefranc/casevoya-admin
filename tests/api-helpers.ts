@@ -80,15 +80,35 @@ export function deps(opts: {
   userDb?: FakeDb;
   session?: "none" | "stale" | "fresh" | "other";
   templateReviewer?: boolean;
-}): ApiDeps & { db: FakeDb; userDb: FakeDb; sessionCalls: string[] } {
+  /** Bad code attempts the lockout store reports, or an error it throws. Omitted: no lockout store. */
+  badAttempts?: number | Error;
+  /** Replaces the session client (e.g. to throw a SessionError). */
+  client?: ApiDeps["sessions"]["client"];
+}): ApiDeps & { db: FakeDb; userDb: FakeDb; sessionCalls: string[]; logs: { message: string; extra?: Record<string, unknown> }[]; attemptQueries: string[] } {
   const db = opts.db ?? fakeDb();
   const userDb = opts.userDb ?? fakeDb();
   const sessionCalls: string[] = [];
+  const logs: { message: string; extra?: Record<string, unknown> }[] = [];
+  const attemptQueries: string[] = [];
   const state = sessionState(opts.session ?? "none");
+  const bad = opts.badAttempts;
   return {
     db,
     userDb,
     sessionCalls,
+    logs,
+    attemptQueries,
+    ...(bad === undefined
+      ? {}
+      : {
+          attempts: {
+            recentBadAttempts: async (_c, since) => {
+              attemptQueries.push(since);
+              if (bad instanceof Error) throw bad;
+              return bad;
+            },
+          },
+        }),
     gate: async (mode) => {
       if (opts.denied) throw opts.denied;
       const role = opts.role === undefined ? "owner" : opts.role;
@@ -108,15 +128,24 @@ export function deps(opts: {
       signOut: async () => {
         sessionCalls.push("signOut");
       },
-      client: async (_c, code) => {
-        sessionCalls.push(code ? `client:${code}` : "client");
-        return { client: userDb as never, status: sessionState("fresh") };
-      },
+      client:
+        opts.client ??
+        (async (_c, code) => {
+          sessionCalls.push(code ? `client:${code}` : "client");
+          return { client: userDb as never, status: sessionState("fresh") };
+        }),
     },
     nowSeconds: () => NOW,
     requestId: () => "req-1",
-    log: () => undefined,
+    log: (message, extra) => {
+      logs.push({ message, extra });
+    },
   };
+}
+
+/** Audit entries without the "started" rows that high-risk actions write first. */
+export function outcomeAudits(db: FakeDb): Call[] {
+  return auditCalls(db).filter((c) => !String(c.args.p_action).endsWith(".started"));
 }
 
 export function req(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Request {

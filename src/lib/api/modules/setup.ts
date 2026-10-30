@@ -3,7 +3,7 @@ import type { AdminEnv } from "../../env";
 import type { SetupContext } from "../../guard";
 import type { SessionStatus, TotpEnrolment } from "../../session";
 import { defineEndpoint, rpc, type HandlerCtx } from "../core";
-import { ApiError } from "../errors";
+import { ApiError, redact } from "../errors";
 import { code, empty } from "../schemas";
 
 /**
@@ -180,7 +180,9 @@ export const setupEndpoints = [
           user = await setup.createUser(caller, { password: ctx.input.password, fullName: ctx.input.fullName });
         } catch (error) {
           if (error instanceof ApiError) throw error;
-          const message = error instanceof Error ? error.message : "The account could not be created";
+          // Supabase Auth's message stays in the server log; the browser gets a generic one.
+          ctx.log("admin setup account creation refused", { requestId: ctx.requestId, error: redact(error instanceof Error ? error.message : String(error)) });
+          const message = "The account could not be created. Check that the password meets Casevoya's password rules, then try again.";
           throw new ApiError("validation_failed", message, { issues: [{ path: "password", message }] });
         }
         created = true;
@@ -291,7 +293,16 @@ export const setupEndpoints = [
       const { user, status } = await requireSetupSession(rawCtx, caller);
       if (!verifiedTotp(user).length) throw new ApiError("conflict", "Verify your authenticator app first (step 2)");
       if (status.aal !== "aal2") throw new ApiError("step_up_required", "Enter a code from your authenticator app first (step 2)");
-      await rpc<string>(caller.db, "bootstrap_first_platform_admin", { p_user_id: user.id, p_note: SETUP_NOTE });
+      try {
+        await rpc<string>(caller.db, "bootstrap_first_platform_admin", { p_user_id: user.id, p_note: SETUP_NOTE });
+      } catch (error) {
+        if (error instanceof ApiError && error.code === "forbidden") {
+          const out = new ApiError("forbidden", "The database refused to make you the first admin: a platform admin probably already exists. Reload the page.");
+          out.internal = error.internal;
+          throw out;
+        }
+        throw error;
+      }
       rawCtx.log("admin setup finished: first platform admin created", { requestId: rawCtx.requestId, userId: user.id });
       return { done: true, userId: user.id, role: "owner" };
     },
