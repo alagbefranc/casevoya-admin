@@ -21,6 +21,10 @@ page, with request/response shapes, rules and workflows, is **docs/FRONTEND-SPEC
 7. Own session: some endpoints run as the admin's own Supabase session (cookie
    `__Host-cv-admin-session`, 1 h). Missing or not the Access user: `401 session_required`. Step-up
    endpoints need a TOTP within 15 minutes, or a `code` in the body: else `403 step_up_required`.
+   A request carrying a `code` (sign-in also carries the password) first reserves an attempt with the
+   service-role function `platform_admin_reserve_attempt` (main-app migration) and resolves it with
+   `platform_admin_resolve_attempt`; after 5 failed or unresolved attempts in 15 minutes it answers
+   `429 rate_limited` (`details.retryAfterSeconds`), and `502` when no reservation can be made.
 8. Handler, then an audit entry (`platform_admin_record_audit`, action `admin_portal.<area>.<verb>`) for
    every mutation, including denied and failed attempts.
 

@@ -3,6 +3,7 @@ import { handle, type ApiDeps } from "@/lib/api/core";
 import { ENDPOINTS } from "@/lib/api/registry";
 import { signIn, signOut, sessionStatus, stepUp, userSessionClient } from "@/lib/session";
 import { supabaseSetup } from "@/lib/setup";
+import { rpcAttemptStore } from "@/lib/lockout";
 
 /**
  * /api/admin/* — the admin portal's JSON API. Every request passes the Access + platform_admins gate in
@@ -17,6 +18,7 @@ const deps: ApiDeps = {
   gate: (mode) => requireCaller(mode),
   sessions: { status: sessionStatus, signIn, stepUp, signOut, client: userSessionClient },
   setup: supabaseSetup,
+  attempts: rpcAttemptStore,
 };
 
 const run = (request: Request) => handle(request, ENDPOINTS, deps);

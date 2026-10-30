@@ -23,8 +23,10 @@ still edit their own copy.
 | Reject (reason 3–500 chars) | the flagged reviewer | same session rules as approve |
 
 The reviewer session: password + authenticator code, kept in one httpOnly, Secure, SameSite=Strict,
-host-only cookie for at most an hour, used only for the RPCs that must run as the admin (enforced by
-`scripts/check-boundaries.mjs`). Every decision asks for a fresh code.
+host-only cookie (idle for at most an hour, and never more than 12 hours after sign-in), used only for the
+RPCs that must run as the admin (enforced by `scripts/check-boundaries.mjs`). Every decision needs a step-up
+from the last 15 minutes. Rollback also needs an explicit confirmation and a reason; reject needs a submitted draft.
+After 5 wrong codes or passwords in 15 minutes, code entry is refused for 15 minutes.
 
 ## Adding the reviewer (when their email is known)
 

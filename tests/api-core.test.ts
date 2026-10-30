@@ -8,7 +8,7 @@ import { phaseOf } from "@/lib/api/modules/notices";
 import { durationMinutes } from "@/lib/api/modules/incidents";
 import { readCiccCsv, CsvError } from "@/lib/api/cicc-csv";
 import { sourcesForDb, torontoToday } from "@/lib/templates";
-import { ID, ME, NOW, ORG, auditCalls, deps, fakeDb, req } from "./api-helpers";
+import { ID, ME, NOW, ORG, auditCalls, deps, fakeDb, outcomeAudits, req } from "./api-helpers";
 
 const body = (res: Response) => res.json() as Promise<{ data?: unknown; error?: { code: string; message: string; details?: unknown; requestId: string } }>;
 
@@ -106,14 +106,14 @@ describe("own session and step-up", () => {
     const d = deps({ session: "fresh", db: db(), userDb: fakeDb({ platform_replay_outbox_event: { error: { code: "42501", message: "step-up is required" } } }) });
     const res = await handle(retry(), ENDPOINTS, d);
     expect((await body(res)).error?.code).toBe("step_up_required");
-    expect(auditCalls(d.db)[0].args).toMatchObject({ p_result: "denied", p_object_id: ID, p_organization_id: ORG });
+    expect(outcomeAudits(d.db)[0].args).toMatchObject({ p_result: "denied", p_object_id: ID, p_organization_id: ORG });
   });
   it("reports a database validation refusal as 422 and audits a failure", async () => {
     const d = deps({ session: "fresh", db: db(), userDb: fakeDb({ platform_replay_outbox_event: { error: { code: "22023", message: "only a dead-lettered event can be retried" } } }) });
     const res = await handle(retry(), ENDPOINTS, d);
     expect(res.status).toBe(422);
     expect((await body(res)).error?.message).toMatch(/dead-lettered/);
-    expect(auditCalls(d.db)[0].args).toMatchObject({ p_result: "failure" });
+    expect(outcomeAudits(d.db)[0].args).toMatchObject({ p_result: "failure" });
   });
 });
 
@@ -262,8 +262,8 @@ describe("designer pages", () => {
     const res = await handle(req("PATCH", "/config/settings/trial.duration", { value: { unit: "days", count: 21 }, reason: "Pilot request" }), ENDPOINTS, d);
     expect(res.status).toBe(200);
     expect(d.userDb.calls[0]).toMatchObject({ fn: "set_product_setting", args: { p_key: "trial.duration", p_value: { unit: "days", count: 21 } } });
-    expect(auditCalls(d.db)[0].args).toMatchObject({ p_action: "admin_portal.config.setting_changed", p_result: "success" });
-    expect((auditCalls(d.db)[0].args as { p_context: Record<string, unknown> }).p_context).toMatchObject({ key: "trial.duration", before: { unit: "days", count: 14 } });
+    expect(outcomeAudits(d.db)[0].args).toMatchObject({ p_action: "admin_portal.config.setting_changed", p_result: "success" });
+    expect((outcomeAudits(d.db)[0].args as { p_context: Record<string, unknown> }).p_context).toMatchObject({ key: "trial.duration", before: { unit: "days", count: 14 } });
   });
   it("404s an unknown setting without calling the database function", async () => {
     const d = deps({ session: "fresh" });

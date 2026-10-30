@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { handle, type ApiDeps } from "@/lib/api/core";
 import { ENDPOINTS } from "@/lib/api/registry";
-import { SETUP_MAX_BAD_ATTEMPTS, SETUP_NOTE, type SetupApi, type SetupFactor, type SetupUser } from "@/lib/api/modules/setup";
+import { SETUP_ALREADY_DONE_MESSAGE, SETUP_MAX_BAD_ATTEMPTS, SETUP_NOTE, type SetupApi, type SetupFactor, type SetupUser } from "@/lib/api/modules/setup";
 import { AdminDenied, evaluateSetupGate, type SetupContext } from "@/lib/guard";
 import { SessionError, type SessionStatus } from "@/lib/session";
 import { ID, ME, NOW, auditCalls, deps as baseDeps, env, fakeDb, req, sessionState, type FakeDb } from "./api-helpers";
@@ -439,12 +439,23 @@ describe("POST /setup/finish", () => {
     expect(status).toBe(401);
     expect(d.db.calls.some((c) => c.fn === "bootstrap_first_platform_admin")).toBe(false);
   });
-  it("maps the database's 'already exists' refusal to forbidden (race with another bootstrap)", async () => {
+  it("maps the database's 'already exists' refusal (42501 or 55000) to the friendly locked message (race with another bootstrap)", async () => {
+    for (const code of ["42501", "55000"]) {
+      const w = world({ user: user([verified]), session: sessionState("fresh") });
+      const d = deps(w, { rpcs: { bootstrap_first_platform_admin: { error: { code, message: "a platform admin already exists; use an invite instead" } } } });
+      const { status, json } = await call(d, "POST", "/setup/finish", { confirm: true });
+      expect(status, code).toBe(409);
+      expect(json.error?.code).toBe("conflict");
+      expect(json.error?.message).toBe(SETUP_ALREADY_DONE_MESSAGE);
+      expect(json.error?.details).toMatchObject({ locked: true });
+    }
+  });
+  it("keeps other bootstrap failures generic", async () => {
     const w = world({ user: user([verified]), session: sessionState("fresh") });
-    const d = deps(w, { rpcs: { bootstrap_first_platform_admin: { error: { code: "42501", message: "a platform admin already exists" } } } });
+    const d = deps(w, { rpcs: { bootstrap_first_platform_admin: { error: { code: "XX000", message: 'relation "platform_admins" is broken' } } } });
     const { status, json } = await call(d, "POST", "/setup/finish", { confirm: true });
-    expect(status).toBe(403);
-    expect(json.error?.message).toMatch(/already exists/);
+    expect(status).toBe(502);
+    expect(json.error?.message).not.toMatch(/platform_admins/);
   });
   it("needs explicit confirmation", async () => {
     const w = world({ user: user([verified]), session: sessionState("fresh") });

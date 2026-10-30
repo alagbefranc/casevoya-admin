@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ALL_ROLES, defineEndpoint, rpc } from "../core";
-import { ApiError } from "../errors";
+import { fromDbError } from "../errors";
 import { limit, offset } from "../schemas";
 import { phaseOf } from "./notices";
 
@@ -38,7 +38,7 @@ export const incidentEndpoints = [
       if (input.state === "open") query = query.neq("status", "resolved");
       if (input.state === "resolved") query = query.eq("status", "resolved");
       const { data, error, count } = await query;
-      if (error) throw new ApiError("upstream_error", error.message);
+      if (error) throw fromDbError(error);
       const rows = (data ?? []) as Row[];
       const overview = await rpc<{ incidents: unknown; queues: unknown }>(db, "platform_overview");
       return {

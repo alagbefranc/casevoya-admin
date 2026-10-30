@@ -1,8 +1,8 @@
 import type { AdminEnv } from "@/lib/env";
 import type { AdminRole } from "@/lib/guard";
 import { AdminDenied } from "@/lib/guard";
-import type { ApiDeps, Caller } from "@/lib/api/core";
-import type { SessionStatus } from "@/lib/session";
+import type { ApiDeps, AttemptStore, Caller } from "@/lib/api/core";
+import { SessionError, type SessionStatus } from "@/lib/session";
 
 export const ORIGIN = "https://admin.casevoya.ca";
 export const ME = "11111111-1111-4111-8111-111111111111";
@@ -80,15 +80,62 @@ export function deps(opts: {
   userDb?: FakeDb;
   session?: "none" | "stale" | "fresh" | "other";
   templateReviewer?: boolean;
-}): ApiDeps & { db: FakeDb; userDb: FakeDb; sessionCalls: string[] } {
+  /**
+   * Failed attempts already recorded for the admin in the lockout window, or an error the reservation throws.
+   * Omitted: no lockout store. The fake store follows the database contract: pending reservations count as failures.
+   */
+  badAttempts?: number | Error;
+  /** Makes the fake store's resolve() throw. */
+  resolveError?: Error;
+  /** Replaces the session client (e.g. to throw a SessionError). */
+  client?: ApiDeps["sessions"]["client"];
+  /** Replaces the session status (e.g. to throw). */
+  status?: ApiDeps["sessions"]["status"];
+  /** Passwords or codes the fake signIn / stepUp refuse (SessionError bad_credentials / bad_code). */
+  reject?: string[];
+}): ApiDeps & {
+  db: FakeDb;
+  userDb: FakeDb;
+  sessionCalls: string[];
+  logs: { message: string; extra?: Record<string, unknown> }[];
+  /** "reserve:<kind>" and "resolve:<succeeded>" in call order. */
+  attemptCalls: string[];
+  /** Reservations the fake store holds: succeeded null while pending. */
+  attemptRows: { id: string; kind: string; succeeded: boolean | null }[];
+} {
   const db = opts.db ?? fakeDb();
   const userDb = opts.userDb ?? fakeDb();
   const sessionCalls: string[] = [];
+  const logs: { message: string; extra?: Record<string, unknown> }[] = [];
+  const attemptCalls: string[] = [];
+  const attemptRows: { id: string; kind: string; succeeded: boolean | null }[] = [];
   const state = sessionState(opts.session ?? "none");
+  const bad = opts.badAttempts;
+  const attempts: AttemptStore = {
+    reserve: async (_c, kind) => {
+      attemptCalls.push(`reserve:${kind}`);
+      if (bad instanceof Error) throw bad;
+      const failures = (bad ?? 0) + attemptRows.filter((r) => r.succeeded !== true).length;
+      if (failures >= 5) return { allowed: false, attemptId: null, retryAfterSeconds: 900 };
+      const id = `00000000-0000-4000-8000-${String(attemptRows.length + 1).padStart(12, "0")}`;
+      attemptRows.push({ id, kind, succeeded: null });
+      return { allowed: true, attemptId: id, retryAfterSeconds: 0 };
+    },
+    resolve: async (_c, id, succeeded) => {
+      attemptCalls.push(`resolve:${succeeded}`);
+      if (opts.resolveError) throw opts.resolveError;
+      const row = attemptRows.find((r) => r.id === id);
+      if (row && row.succeeded === null) row.succeeded = succeeded;
+    },
+  };
   return {
     db,
     userDb,
     sessionCalls,
+    logs,
+    attemptCalls,
+    attemptRows,
+    ...(bad === undefined ? {} : { attempts }),
     gate: async (mode) => {
       if (opts.denied) throw opts.denied;
       const role = opts.role === undefined ? "owner" : opts.role;
@@ -96,27 +143,39 @@ export function deps(opts: {
       return caller(role, db, { templateReviewer: opts.templateReviewer });
     },
     sessions: {
-      status: async () => state,
-      signIn: async () => {
+      status: opts.status ?? (async () => state),
+      signIn: async (_c, password, code) => {
         sessionCalls.push("signIn");
+        if (opts.reject?.includes(password)) throw new SessionError("bad_credentials", "Email or password was not accepted.");
+        if (opts.reject?.includes(code)) throw new SessionError("bad_code", "That authenticator code was not accepted.");
         return sessionState("fresh");
       },
-      stepUp: async () => {
+      stepUp: async (_c, code) => {
         sessionCalls.push("stepUp");
+        if (opts.reject?.includes(code)) throw new SessionError("bad_code", "That authenticator code was not accepted.");
         return sessionState("fresh");
       },
       signOut: async () => {
         sessionCalls.push("signOut");
       },
-      client: async (_c, code) => {
-        sessionCalls.push(code ? `client:${code}` : "client");
-        return { client: userDb as never, status: sessionState("fresh") };
-      },
+      client:
+        opts.client ??
+        (async (_c, code) => {
+          sessionCalls.push(code ? `client:${code}` : "client");
+          return { client: userDb as never, status: sessionState("fresh") };
+        }),
     },
     nowSeconds: () => NOW,
     requestId: () => "req-1",
-    log: () => undefined,
+    log: (message, extra) => {
+      logs.push({ message, extra });
+    },
   };
+}
+
+/** Audit entries without the "started" rows that high-risk actions write first. */
+export function outcomeAudits(db: FakeDb): Call[] {
+  return auditCalls(db).filter((c) => !String(c.args.p_action).endsWith(".started"));
 }
 
 export function req(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Request {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ALL_ROLES, OPERATORS, defineEndpoint, must, rpc } from "../core";
-import { ApiError } from "../errors";
+import { ApiError, fromDbError } from "../errors";
 import { isoTime, limit, offset, uuid } from "../schemas";
 
 export const NOTICE_KINDS = ["maintenance", "incident", "info"] as const;
@@ -59,7 +59,7 @@ export const updateNoticeInput = z
 
 async function loadNotice(db: import("@supabase/supabase-js").SupabaseClient, id: string): Promise<NoticeRow> {
   const { data, error } = await db.from("service_notices").select(NOTICE_COLUMNS).eq("id", id).maybeSingle();
-  if (error) throw new ApiError("upstream_error", error.message);
+  if (error) throw fromDbError(error);
   return must(data as NoticeRow | null, "Notice");
 }
 
@@ -67,12 +67,12 @@ async function targetsOf(db: import("@supabase/supabase-js").SupabaseClient, ids
   const out = new Map<string, { id: string; display_name: string }[]>();
   if (!ids.length) return out;
   const { data, error } = await db.from("service_notice_targets").select("notice_id, organization_id").in("notice_id", ids);
-  if (error) throw new ApiError("upstream_error", error.message);
+  if (error) throw fromDbError(error);
   const orgIds = [...new Set((data ?? []).map((t) => t.organization_id as string))];
   const names = new Map<string, string>();
   if (orgIds.length) {
     const { data: orgs, error: orgError } = await db.from("organizations").select("id, display_name").in("id", orgIds);
-    if (orgError) throw new ApiError("upstream_error", orgError.message);
+    if (orgError) throw fromDbError(orgError);
     for (const o of orgs ?? []) names.set(o.id as string, o.display_name as string);
   }
   for (const t of data ?? []) {
@@ -94,7 +94,7 @@ export const noticeEndpoints = [
       let query = db.from("service_notices").select(NOTICE_COLUMNS, { count: "exact" }).order("created_at", { ascending: false }).range(input.offset, input.offset + input.limit - 1);
       if (input.status) query = query.eq("status", input.status);
       const { data, error, count } = await query;
-      if (error) throw new ApiError("upstream_error", error.message);
+      if (error) throw fromDbError(error);
       const rows = (data ?? []) as NoticeRow[];
       const targets = await targetsOf(db, rows.filter((r) => r.audience !== "all").map((r) => r.id));
       return {

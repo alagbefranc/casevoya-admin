@@ -48,6 +48,7 @@ export const ciccImportInput = z.object({
   fileLocator: z.string().trim().max(500).optional().nullable(),
   csv: z.string().min(1, "The file is empty").max(8_000_000, "The file is larger than 8 MB"),
   dryRun: z.boolean().default(true),
+  code: optionalCode,
 });
 
 export const licenceEndpoints = [
@@ -74,6 +75,7 @@ export const licenceEndpoints = [
     roles: OPERATORS,
     input: licenceCheckInput,
     session: "step_up",
+    auditRequired: true,
     audit: { action: "licences.check_recorded", table: "public.consultant_credentials" },
     async handler({ db, input, audit, userClient }) {
       const detail = must(await rpc<CredentialDetail | null>(db, "platform_credential_detail", { p_credential_id: input.id }), "Credential");
@@ -99,9 +101,12 @@ export const licenceEndpoints = [
   defineEndpoint({
     method: "POST",
     path: "/licences/credentials/:id/cicc-check",
-    summary: "Re-check one credential against the latest imported CICC list.",
+    summary: "Re-check one credential against the latest imported CICC list. Fresh step-up, proven to the database with your own session first.",
     roles: OPERATORS,
-    input: z.object({ id: uuid }),
+    input: z.object({ id: uuid, code: optionalCode }),
+    session: "step_up",
+    serviceStepUp: true,
+    auditRequired: true,
     audit: { action: "licences.cicc_check", table: "public.consultant_credentials" },
     async handler({ db, input, audit }) {
       const detail = must(await rpc<CredentialDetail | null>(db, "platform_credential_detail", { p_credential_id: input.id }), "Credential");
@@ -122,9 +127,13 @@ export const licenceEndpoints = [
   defineEndpoint({
     method: "POST",
     path: "/licences/cicc-imports",
-    summary: "Upload the College's CSV. dryRun (default true) returns counts only; dryRun false imports and re-checks every credential.",
+    summary:
+      "Upload the College's CSV. dryRun (default true) returns counts only; dryRun false imports and re-checks every credential and needs a fresh step-up, proven to the database with your own session first.",
     roles: OPERATORS,
     input: ciccImportInput,
+    session: (input) => (input.dryRun ? "none" : "step_up"),
+    serviceStepUp: true,
+    auditRequired: (input) => !input.dryRun,
     audit: { action: "licences.cicc_import", table: "public.cicc_register_imports" },
     async handler({ db, input, audit, admin }) {
       let parsed: ReturnType<typeof readCiccCsv>;
@@ -150,7 +159,9 @@ export const licenceEndpoints = [
           await rpc(db, "import_cicc_register", { p_import_id: importId, p_rows: parsed.rows.slice(i, i + CICC_CHUNK) });
         } catch (error) {
           if (error instanceof ApiError) {
-            throw new ApiError(error.code, `Rows ${i + 1}-${Math.min(i + CICC_CHUNK, parsed.rows.length)} failed: ${error.message}. Import ${importId} stays open and unused.`, { importId });
+            const out = new ApiError(error.code, `Rows ${i + 1}-${Math.min(i + CICC_CHUNK, parsed.rows.length)} failed: ${error.message}. Import ${importId} stays open and unused.`, { importId });
+            out.internal = error.internal;
+            throw out;
           }
           throw error;
         }

@@ -67,7 +67,7 @@ export default function AdminsPage() {
                         {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                       </select>
                     )) },
-                  { key: "rev", label: "Template reviewer", render: (a) => <input type="checkbox" role="switch" className="toggle" aria-label={`Template reviewer: ${a.email}`} checked={a.template_reviewer} disabled={!online} onChange={(e) => void setReviewer(a, e.target.checked)} /> },
+                  { key: "rev", label: "Template reviewer", render: (a) => <input type="checkbox" role="switch" className="toggle" aria-label={`Template reviewer: ${a.email}`} checked={a.template_reviewer} disabled={!online || (a.role === "viewer" && !a.template_reviewer)} title={a.role === "viewer" && !a.template_reviewer ? "Viewers cannot review templates" : undefined} onChange={(e) => void setReviewer(a, e.target.checked)} /> },
                   { key: "lic", label: "Licensed", render: (a) => (a.licensed ? <Badge tone="ok">Licensed</Badge> : dash) },
                   { key: "mfa", label: "Factors", render: (a) => (a.verified_factors ? `${a.verified_factors} authenticator${a.verified_factors === 1 ? "" : "s"}` : <Badge tone="warn">None</Badge>) },
                   { key: "seen", label: "Last sign-in", render: (a) => when(a.last_sign_in_at) },
@@ -148,7 +148,7 @@ function InviteDrawer({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const out = await withAuth((retry) => api.post<InviteOut>("/admins/invites", { email: email.trim(), role, templateReviewer: reviewer, note: note.trim() || null, days: d, code: inlineCode && !retry && code ? code : undefined }));
+      const out = await withAuth((retry) => api.post<InviteOut>("/admins/invites", { email: email.trim(), role, templateReviewer: reviewer && role !== "viewer", note: note.trim() || null, days: d, code: inlineCode && !retry && code ? code : undefined }));
       refreshAll();
       setDone(out);
     } catch (e) {
@@ -166,7 +166,7 @@ function InviteDrawer({ onClose }: { onClose: () => void }) {
           <p style={{ margin: 0 }}>No email is sent. Tell {email.trim()} yourself, then:</p>
           <ol className="steps">{done.nextSteps.map((s) => <li key={s}>{s}</li>)}</ol>
           {done.accessReady ? <Alert tone="ok">This email is already on the portal&apos;s allow list.</Alert> : <Alert tone="warn" title="Not on the allow list yet">This email is not on the portal&apos;s allow list yet.</Alert>}
-          <dl className="dl"><div><dt>Role</dt><dd>{role}{reviewer ? " · template reviewer" : ""}</dd></div><div><dt>Expires</dt><dd>{when(new Date((now + d * 86400) * 1000).toISOString())}</dd></div></dl>
+          <dl className="dl"><div><dt>Role</dt><dd>{role}{reviewer && role !== "viewer" ? " · template reviewer" : ""}</dd></div><div><dt>Expires</dt><dd>{when(new Date((now + d * 86400) * 1000).toISOString())}</dd></div></dl>
         </div>
       </Drawer>
     );
@@ -186,9 +186,9 @@ function InviteDrawer({ onClose }: { onClose: () => void }) {
         </Field>
         <fieldset className="fld" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Role</legend>
-          <div className="radios">{ROLES.map((r) => <label key={r}><input type="radio" name="role" checked={role === r} onChange={() => setRole(r)} />{r}</label>)}</div>
+          <div className="radios">{ROLES.map((r) => <label key={r}><input type="radio" name="role" checked={role === r} onChange={() => { setRole(r); if (r === "viewer") setReviewer(false); }} />{r}</label>)}</div>
         </fieldset>
-        <label className="check"><input type="checkbox" checked={reviewer} onChange={(e) => setReviewer(e.target.checked)} />Template reviewer (also needs a verified licence to review)</label>
+        <label className="check"><input type="checkbox" checked={reviewer && role !== "viewer"} disabled={role === "viewer"} onChange={(e) => setReviewer(e.target.checked)} />Template reviewer (owners and operators only; also needs a verified licence to review)</label>
         <TextArea id="i-note" label="Note (optional)" max={200} value={note} onChange={setNote} error={issues?.byField.note ?? null} rows={2} />
         <Field id="i-days" label="Expires after (days)" hint="1 to 30." error={issues?.byField.days ?? null}>
           <input id="i-days" className="inp" type="number" min={1} max={30} value={days} onChange={(e) => setDays(e.target.value)} />

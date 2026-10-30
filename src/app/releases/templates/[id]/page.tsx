@@ -43,6 +43,7 @@ export default function VersionPage() {
   const [action, setAction] = useState<Decision | null>(null);
   const [revise, setRevise] = useState(false);
   const [compared, setCompared] = useState(false);
+  const [rollbackConfirmed, setRollbackConfirmed] = useState(false);
   // The review hash of the content first shown here. Approval sends this one, so it binds to what was on screen;
   // if a refresh brings different content, the reviewer has to acknowledge it before approving.
   const [reviewed, setReviewed] = useState<{ id: string; hash: string } | null>(null);
@@ -170,8 +171,9 @@ export default function VersionPage() {
         </ConfirmDialog>
       ) : null}
       {action === "rollback" && v ? (
-        <ConfirmDialog title={v.supersedes_version_id ? `Withdraw v${v.version_number} and restore v${v.version_number - 1}?` : `Withdraw v${v.version_number}?`} confirmLabel="Roll back" danger stepUp reason={{ min: 3, max: 500 }} successToast="Rolled back"
-          onConfirm={({ reason, code }) => api.post(`/templates/versions/${v.id}/rollback`, { reason, ...(code ? { code } : {}) })} onClose={() => setAction(null)}>
+        <ConfirmDialog title={v.supersedes_version_id ? `Withdraw v${v.version_number} and restore v${v.version_number - 1}?` : `Withdraw v${v.version_number}?`} confirmLabel="Roll back" danger stepUp reason={{ min: 3, max: 500 }} successToast="Rolled back" disabled={!rollbackConfirmed}
+          extra={<label className="check"><input type="checkbox" checked={rollbackConfirmed} onChange={(e) => setRollbackConfirmed(e.target.checked)} />I understand adopting firms lose this version</label>}
+          onConfirm={({ reason, code }) => api.post(`/templates/versions/${v.id}/rollback`, { reason, confirmRollback: true, ...(code ? { code } : {}) })} onClose={() => { setAction(null); setRollbackConfirmed(false); }}>
           {v.supersedes_version_id
             ? <p style={{ margin: 0 }}>Adopting firms get the previous version back and are notified in Casevoya.</p>
             : <Alert tone="warn" title="There is no earlier version: the template will have no published version." />}

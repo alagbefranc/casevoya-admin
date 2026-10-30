@@ -6,6 +6,7 @@ import { CanOperate, useAdmin } from "@/client/app";
 import { ConfirmDialog } from "@/client/confirm";
 import { bytes, clock, duration, num, when } from "@/client/format";
 import { refreshAll, useApi, useQueryState } from "@/client/hooks";
+import { auditResultLabel } from "@/client/records";
 import type { Page } from "@/client/types";
 import { Alert, Badge, DataTable, Drawer, Empty, MetricCard, NotBuilt, PageHeader, Pager, Panel, Section, SelectField, SkeletonCards, SkeletonRows, Status, Timeline } from "@/components/ui";
 
@@ -152,7 +153,7 @@ function DeadLetterDrawer({ id, onClose, onRetry }: { id: string; onClose: () =>
             <p className="muted" style={{ fontSize: 12.5 }}>The payload itself is never shown here: only its keys and size.</p>
             <h3 className="h3">Replays</h3>
             {e.replays.length ? (
-              <Timeline items={e.replays.map((r, i) => ({ key: `${r.at}-${i}`, at: r.at, title: r.action ?? "Retry", meta: [r.actor_email, r.result].filter(Boolean).join(" · ") }))} />
+              <Timeline items={e.replays.map((r, i) => ({ key: `${r.at}-${i}`, at: r.at, title: r.action ?? "Retry", meta: [r.actor_email, r.result ? auditResultLabel(r).label : null].filter(Boolean).join(" · ") }))} />
             ) : <p className="muted" style={{ margin: 0 }}>Not retried yet.</p>}
           </>
         )}

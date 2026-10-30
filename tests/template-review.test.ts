@@ -5,7 +5,7 @@ import { fromDbError } from "@/lib/api/errors";
 import { REVIEW_CHANGED_MESSAGE } from "@/lib/api/modules/templates";
 import { ApiFailure } from "@/client/api";
 import { isReviewChanged, reviewActions } from "@/client/template-review";
-import { ID, ME, OTHER, auditCalls, deps, fakeDb, req } from "./api-helpers";
+import { ID, ME, OTHER, auditCalls, deps, fakeDb, outcomeAudits, req } from "./api-helpers";
 
 /** ADM-03 review binding: submit / withdraw by the author, approval bound to the review hash the reviewer saw. */
 
@@ -57,7 +57,8 @@ describe("POST /templates/versions/:id/approve", () => {
     expect(res.status).toBe(200);
     expect(d.userDb.calls).toEqual([{ fn: "approve_shared_template_version", args: { p_version_id: ID, p_expected_review_hash: HASH } }]);
     expect(d.db.calls.map((c) => c.fn)).not.toContain("approve_shared_template_version");
-    expect(auditCalls(d.db)[0].args).toMatchObject({ p_result: "success", p_action: "admin_portal.templates.approve", p_context: expect.objectContaining({ review_hash: HASH }) });
+    expect(outcomeAudits(d.db)[0].args).toMatchObject({ p_result: "success", p_action: "admin_portal.templates.approve", p_context: expect.objectContaining({ review_hash: HASH }) });
+    expect(auditCalls(d.db)[0].args).toMatchObject({ p_action: "admin_portal.templates.approve.started", p_context: expect.objectContaining({ phase: "started" }) });
   });
 
   it("refuses without the review hash and never calls the database", async () => {
@@ -92,14 +93,24 @@ describe("POST /templates/versions/:id/approve", () => {
     expect(err.code).toBe("conflict");
     expect(err.message).toBe(REVIEW_CHANGED_MESSAGE);
     expect(err.details).toMatchObject({ reload: true, reason: "review_changed" });
-    expect(auditCalls(d.db)[0].args).toMatchObject({ p_result: "failure" });
+    expect(outcomeAudits(d.db)[0].args).toMatchObject({ p_result: "failure" });
   });
 
-  it("passes other database refusals through unchanged", async () => {
+  it("shows a plain business-rule refusal, logging the raw one server-side", async () => {
     const d = approveDeps({ userRpcs: { approve_shared_template_version: { error: { code: "42501", message: "the author cannot approve their own version" } } } });
     const res = await handle(approve(), ENDPOINTS, d);
     expect(res.status).toBe(403);
-    expect((await body(res)).error?.message).toMatch(/author/);
+    const err = (await body(res)).error!;
+    expect(err.code).toBe("forbidden");
+    expect(err.message).toBe("the author cannot approve their own version");
+    expect(JSON.stringify(d.logs)).toMatch(/the author cannot approve their own version/);
+  });
+
+  it("keeps refusals that look like internal detail generic", async () => {
+    const d = approveDeps({ userRpcs: { approve_shared_template_version: { error: { code: "42501", message: "permission denied for table shared_template_versions" } } } });
+    const res = await handle(approve(), ENDPOINTS, d);
+    expect(res.status).toBe(403);
+    expect((await body(res)).error!.message).not.toMatch(/shared_template_versions|permission denied/);
   });
 
   it("still needs the reviewer flag", async () => {
@@ -197,8 +208,8 @@ describe("version page actions", () => {
     expect(reviewActions({ ...base, isAuthor: true, hasOfficialSource: false }, author).submitBlocked).toMatch(/official source/);
   });
 
-  it("shows approve to a reviewer only once the draft is submitted", () => {
-    expect(reviewActions(base, reviewer)).toMatchObject({ canApprove: false, canReject: true, canSubmit: false });
+  it("shows approve and reject to a reviewer only once the draft is submitted", () => {
+    expect(reviewActions(base, reviewer)).toMatchObject({ canApprove: false, canReject: false, canSubmit: false });
     expect(reviewActions({ ...base, inReview: true }, reviewer)).toMatchObject({ canApprove: true, canReject: true, approveBlocked: null });
   });
 

@@ -1437,9 +1437,9 @@ action (prefixed `admin_portal.`; mutations only).
 | GET | /licences/queue | all | — | — | Verification |
 | GET | /licences/credentials/:id | all | — | — | Verification |
 | POST | /licences/credentials/:id/checks | ops | up | licences.check_recorded | Verification |
-| POST | /licences/credentials/:id/cicc-check | ops | — | licences.cicc_check | Verification |
+| POST | /licences/credentials/:id/cicc-check | ops | up | licences.cicc_check | Verification |
 | GET | /licences/cicc-imports | all | — | — | Verification |
-| POST | /licences/cicc-imports | ops | — | licences.cicc_import | Verification |
+| POST | /licences/cicc-imports | ops | up (not for dry runs) | licences.cicc_import | Verification |
 | GET | /support/requests | all | — | — | Grants |
 | GET | /support/requests/:id | all | — | — | Grants |
 | POST | /support/requests | ops | — | support.request_created | Grants |

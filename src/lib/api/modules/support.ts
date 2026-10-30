@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ALL_ROLES, OPERATORS, defineEndpoint, must, rpc } from "../core";
-import { ApiError } from "../errors";
+import { fromDbError } from "../errors";
 import { limit, offset, reason, uuid } from "../schemas";
 
 export const SUPPORT_SCOPES = ["firm_settings", "matter_documents", "matter_records", "matter_all"] as const;
@@ -47,7 +47,7 @@ export const supportEndpoints = [
     input: z.object({ id: uuid }),
     async handler({ db, input }) {
       const { data, error } = await db.from("support_access_requests").select(REQUEST_COLUMNS).eq("id", input.id).maybeSingle();
-      if (error) throw new ApiError("upstream_error", error.message);
+      if (error) throw fromDbError(error);
       const request = must(data as RequestRow | null, "Support request");
       const { data: firm } = await db.from("organizations").select("id, display_name").eq("id", request.organization_id).maybeSingle();
       const history = await rpc(db, "platform_support_request_history", { p_request_id: input.id });
@@ -97,7 +97,7 @@ export const supportEndpoints = [
     audit: { action: "support.request_cancelled", table: "public.support_access_requests" },
     async handler({ db, input, audit }) {
       const { data, error } = await db.from("support_access_requests").select("id, organization_id, status").eq("id", input.id).maybeSingle();
-      if (error) throw new ApiError("upstream_error", error.message);
+      if (error) throw fromDbError(error);
       const row = must(data as RequestRow | null, "Support request");
       audit.organizationId = row.organization_id;
       audit.context = { from_status: row.status };

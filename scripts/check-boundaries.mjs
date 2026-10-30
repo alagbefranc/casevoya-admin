@@ -48,6 +48,8 @@ const USER_SESSION_RPCS = new Set([
   "platform_admin_remove",
   "accept_platform_admin_invite",
   "set_product_setting",
+  // Proof of a fresh step-up before a service-role write (src/lib/api/core.ts proveStepUp).
+  "platform_step_up_check",
 ]);
 
 function walk(dir) {
@@ -66,7 +68,8 @@ for (const file of walk(SRC)) {
   if (/SUPABASE_SECRET_KEY/.test(text) && rel !== path.join("src", "lib", "env.ts")) problems.push(`${rel}: reads SUPABASE_SECRET_KEY outside src/lib/env.ts`);
   if (/^\s*["']use client["']/.test(text) && /@\/lib\/(guard|supabase|env|reviewer|session|data|api)/.test(text)) problems.push(`${rel}: a client component imports server-only admin code`);
   for (const match of text.matchAll(/\.from\(\s*["'`]([a-z_]+)["'`]\s*\)/g)) {
-    // First-admin Setup lockout counts its own failed admin_portal.setup.* rows (src/lib/setup.ts only).
+    // The Setup lockout (src/lib/setup.ts) counts the portal's own failed admin_portal.setup.* rows; no other file
+    // reads audit_log directly (the code-attempt lockout uses platform_admin_reserve_attempt).
     if (match[1] === "audit_log" && rel === path.join("src", "lib", "setup.ts")) continue;
     if (!READABLE.has(match[1])) problems.push(`${rel}: reads table ${match[1]}, which is not on the platform-operations allow list`);
   }

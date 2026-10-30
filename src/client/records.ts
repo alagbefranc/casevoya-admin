@@ -6,6 +6,20 @@ export const AUDIT_FAMILIES = [
 
 export const ACTION_PREFIX = /^[a-z_][a-z0-9_.]{0,80}$/;
 
+/**
+ * High-risk actions write a "started" row (result success, context.phase "started") before anything changes; the
+ * outcome is a separate row. Started rows are shown as "started", never as a success.
+ */
+export function isStartedAudit(e: { action?: string | null; context?: Record<string, unknown> | null }): boolean {
+  return e.context?.phase === "started" || /\.started$/.test(e.action ?? "");
+}
+
+export function auditResultLabel(e: { action?: string | null; result?: string | null; context?: Record<string, unknown> | null }): { label: string; tone: "ok" | "warn" | "bad" | "neutral" } {
+  if (isStartedAudit(e)) return { label: "started", tone: "neutral" };
+  const tone = ({ success: "ok", denied: "warn", failure: "bad" } as const)[e.result as "success"] ?? "neutral";
+  return { label: e.result ?? "—", tone };
+}
+
 /** datetime-local value (viewer's zone) → ISO, or null when empty/invalid. */
 export function localToIso(v: string): string | null {
   if (!v) return null;

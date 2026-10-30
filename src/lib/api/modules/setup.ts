@@ -2,8 +2,8 @@ import { z } from "zod";
 import type { AdminEnv } from "../../env";
 import type { SetupContext } from "../../guard";
 import type { SessionStatus, TotpEnrolment } from "../../session";
-import { defineEndpoint, rpc, type HandlerCtx } from "../core";
-import { ApiError } from "../errors";
+import { defineEndpoint, type HandlerCtx } from "../core";
+import { ApiError, fromDbError, redact, type DbError } from "../errors";
 import { code, empty } from "../schemas";
 
 /**
@@ -19,6 +19,7 @@ export const SETUP_NOTE = "first admin via admin portal Setup";
 /** Bad passwords plus bad codes allowed per Access email in the window, counted from the audit log. */
 export const SETUP_MAX_BAD_ATTEMPTS = 5;
 export const SETUP_LOCKOUT_MINUTES = 15;
+export const SETUP_ALREADY_DONE_MESSAGE = "The database refused to make you the first admin: a platform admin already exists. Reload the page.";
 
 export type SetupFactor = { id: string; type: string; status: string; createdAt: string };
 export type SetupUser = { id: string; emailConfirmed: boolean; fullName: string | null; factors: SetupFactor[] };
@@ -180,7 +181,9 @@ export const setupEndpoints = [
           user = await setup.createUser(caller, { password: ctx.input.password, fullName: ctx.input.fullName });
         } catch (error) {
           if (error instanceof ApiError) throw error;
-          const message = error instanceof Error ? error.message : "The account could not be created";
+          // Supabase Auth's message stays in the server log; the browser gets a generic one.
+          ctx.log("admin setup account creation refused", { requestId: ctx.requestId, error: redact(error instanceof Error ? error.message : String(error)) });
+          const message = "The account could not be created. Check that the password meets Casevoya's password rules, then try again.";
           throw new ApiError("validation_failed", message, { issues: [{ path: "password", message }] });
         }
         created = true;
@@ -291,7 +294,17 @@ export const setupEndpoints = [
       const { user, status } = await requireSetupSession(rawCtx, caller);
       if (!verifiedTotp(user).length) throw new ApiError("conflict", "Verify your authenticator app first (step 2)");
       if (status.aal !== "aal2") throw new ApiError("step_up_required", "Enter a code from your authenticator app first (step 2)");
-      await rpc<string>(caller.db, "bootstrap_first_platform_admin", { p_user_id: user.id, p_note: SETUP_NOTE });
+      const { error } = await caller.db.rpc("bootstrap_first_platform_admin", { p_user_id: user.id, p_note: SETUP_NOTE });
+      if (error) {
+        const dbError = error as DbError;
+        // The database refuses once any platform admin exists (42501 today, 55000 in newer migrations).
+        if (dbError.code === "42501" || dbError.code === "55000") {
+          const out = new ApiError("conflict", SETUP_ALREADY_DONE_MESSAGE, { locked: true, lockedAt: null });
+          out.internal = `${dbError.code}: ${dbError.message}`;
+          throw out;
+        }
+        throw fromDbError(dbError);
+      }
       rawCtx.log("admin setup finished: first platform admin created", { requestId: rawCtx.requestId, userId: user.id });
       return { done: true, userId: user.id, role: "owner" };
     },
