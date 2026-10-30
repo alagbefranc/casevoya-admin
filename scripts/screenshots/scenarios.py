@@ -79,5 +79,24 @@ SCENARIOS += [
     {"name": "43-migration", "url": "/migration"},
     {"name": "43b-migration-expanded", "url": "/migration", "steps": [("click", "button[aria-label='Show counts'] >> nth=0")]},
     {"name": "64-privacy-overdue-empty", "url": "/privacy?state=overdue", "routes": {"/privacy/requests": {**fx.PRIVACY, "items": [], "total": 0}}},
-    {"name": "65-sample-empty", "url": "/sample-mode", "routes": {"/sample-mode": fx.SAMPLE_EMPTY}},
+    {"name": "62-sample-empty", "url": "/sample-mode", "routes": {"/sample-mode": fx.SAMPLE_EMPTY}},
+]
+
+SIGNED_OUT = {"signedIn": False, "userId": None, "aal": None, "expiresAt": None, "stepUpAt": None, "stepUpFreshUntil": None, "matchesAccessUser": False}
+INVITED = {**fx.ME, "role": None, "email": "daniel@example.test", "session": SIGNED_OUT, "invite": {"id": fx.uid(800), "role": "operator", "template_reviewer": True, "expires_at": fx.iso(days=6), "invited_at": fx.iso(days=-1)},
+           "capabilities": {**fx.ME["capabilities"], "operate": False, "manageAdmins": False, "reviewTemplates": False, "acceptInvite": True}}
+STEP_UP = (403, {"error": {"code": "step_up_required", "message": "Enter a code from your authenticator app to continue", "requestId": "req_example_0403s"}})
+GRANT_422 = (422, {"error": {"code": "validation_failed", "message": "Check the form", "details": {"issues": [
+    {"path": "organizationId", "message": "Choose a firm."},
+    {"path": "reason", "message": "Write a reason of 8 to 1000 characters."},
+    {"path": "confirmFirmNotified", "message": "Tick the box to confirm the owners must approve."},
+]}, "requestId": "req_example_0422"}})
+
+SCENARIOS += [
+    {"name": "47-invite-signed-out", "url": "/", "routes": {"/session": INVITED}},
+    {"name": "49-stepup-dialog", "url": "/config/admins", "errors": {f"PATCH /admins/{fx.uid(901)}/reviewer": STEP_UP}, "steps": [("click", "input[aria-label='Template reviewer: kenji@example.test']"), ("wait", 400)], "full": False},
+    {"name": "53-state-slow", "url": "/firms", "errors": {"GET /firms": (200, "HANG")}, "wait": "main h1", "settle": 10800},
+    {"name": "58-state-stale", "url": "/usage", "steps": [("fail", ("GET /usage", UPSTREAM)), ("eval", "window.dispatchEvent(new CustomEvent('cv:refresh'))"), ("wait", 600)]},
+    {"name": "59-state-validation", "url": f"/grants?request={fx.uid(6)}", "errors": {"POST /support/requests": GRANT_422}, "steps": [
+        ("fill", ("#g-name", "Jordan Reid")), ("fill", ("#g-reason", "Owner asked us to check a failed upload.")), ("click", ".drawer .check input"), ("click", "button:has-text('Send request')"), ("wait", 500)], "full": False},
 ]

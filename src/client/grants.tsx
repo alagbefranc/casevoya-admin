@@ -7,7 +7,7 @@ import { FirmPicker, type PickedFirm } from "./firm-picker";
 import { refreshAll, useApi } from "./hooks";
 import { splitIssues } from "./session-rules";
 import type { GrantRow } from "./types";
-import { Alert, Drawer, ErrorAlert, Field, TextArea } from "@/components/ui";
+import { ErrorSummary, Alert, Drawer, ErrorAlert, Field, TextArea } from "@/components/ui";
 
 export const SCOPES = ["firm_settings", "matter_documents", "matter_records", "matter_all"] as const;
 
@@ -90,6 +90,7 @@ export function RequestAccessDrawer({ firmId, onClose }: { firmId: string | null
       </>
     }>
       <form id="grant-form" className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <ErrorSummary issues={issues} ids={{ organizationId: "g-firm", matterId: "g-matter", requestedByName: "g-name", requestedByEmail: "g-email", ticketRef: "g-ticket", minutes: "g-min", notIncluded: "g-not", reason: "g-reason" }} />
         <p className="muted" style={{ margin: 0 }}>The firm&apos;s owners decide. Nothing opens until one of them approves.</p>
         <FirmPicker id="g-firm" label="Firm" value={firm} onChange={setFirm} error={err("organizationId")} />
         <fieldset className="fld" style={{ border: 0, padding: 0, margin: 0 }}>
@@ -123,7 +124,6 @@ export function RequestAccessDrawer({ firmId, onClose }: { firmId: string | null
         <TextArea id="g-not" label="Not included (optional)" hint="What you will not look at." max={500} value={notIncluded} onChange={setNotIncluded} error={err("notIncluded")} rows={2} />
         <TextArea id="g-reason" label="Reason" hint="8 to 1000 characters. The firm's owners read this." max={1000} value={reason} onChange={setReason} error={err("reason")} />
         <label className="check"><input type="checkbox" checked={notified} onChange={(e) => setNotified(e.target.checked)} />The firm&apos;s owners will be emailed and must approve</label>
-        {issues?.summary.length ? <div className="summary" role="alert"><b>Check the form</b>{issues.summary.join(" ")}</div> : null}
         {error && !issues ? (error instanceof ApiFailure && ["conflict", "forbidden"].includes(error.code) ? <Alert tone="bad" title={error.message} /> : <ErrorAlert error={error} />) : null}
       </form>
     </Drawer>

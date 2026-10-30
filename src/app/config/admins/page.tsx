@@ -9,7 +9,7 @@ import { refreshAll, useApi, useQueryState } from "@/client/hooks";
 import { dash, day, when } from "@/client/format";
 import { splitIssues, stepUpNeed } from "@/client/session-rules";
 import type { Role } from "@/client/types";
-import { Alert, Badge, CodeInput, DataTable, DeniedState, Drawer, Empty, ErrorAlert, Field, NotBuilt, PageHeader, Panel, Section, SkeletonRows, Status, TextArea } from "@/components/ui";
+import { ErrorSummary, Alert, Badge, CodeInput, DataTable, DeniedState, Drawer, Empty, ErrorAlert, Field, NotBuilt, PageHeader, Panel, Section, SkeletonRows, Status, TextArea } from "@/components/ui";
 
 type AdminRow = { user_id: string; email: string; role: Role; template_reviewer: boolean; note: string | null; created_at: string; created_by_email: string | null; last_sign_in_at: string | null; verified_factors: number; licensed: boolean };
 type InviteRow = { id: string; email: string; role: Role; template_reviewer: boolean; note: string | null; status: string; invited_by_email: string | null; invited_at: string; expires_at: string; accepted_at: string | null; cancelled_at: string | null };
@@ -180,6 +180,7 @@ function InviteDrawer({ onClose }: { onClose: () => void }) {
       </>
     }>
       <form id="invite-form" className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <ErrorSummary issues={issues} ids={{ email: "i-email", note: "i-note", days: "i-days", code: "i-code" }} />
         <Field id="i-email" label="Email" error={issues?.byField.email ?? null}>
           <input id="i-email" className="inp" type="email" autoComplete="off" maxLength={320} value={email} onChange={(e) => setEmail(e.target.value)} />
         </Field>
@@ -194,7 +195,6 @@ function InviteDrawer({ onClose }: { onClose: () => void }) {
         </Field>
         <Alert tone="info">No email is sent. You tell them, add them to Cloudflare Access and ADMIN_ALLOWED_EMAILS, and they accept after signing in with an authenticator app.</Alert>
         {inlineCode ? <div className="codebox-wrap"><p>Your last authenticator check is older than 15 minutes.</p><CodeInput id="i-code" value={code} onChange={setCode} error={issues?.byField.code ?? null} /></div> : null}
-        {issues?.summary.length ? <div className="summary" role="alert"><b>Check the form</b>{issues.summary.join(" ")}</div> : null}
         {error && !issues ? (error instanceof ApiFailure && ["conflict", "forbidden"].includes(error.code) ? <Alert tone="bad" title={error.message} /> : <ErrorAlert error={error} />) : null}
       </form>
     </Drawer>

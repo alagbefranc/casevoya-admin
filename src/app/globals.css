@@ -247,6 +247,8 @@ pre.code, .codebox { background: var(--paper); border-radius: 12px; padding: 10p
 .summary { border: 1px solid #f5c2be; background: #fff6f5; border-radius: 14px; padding: 12px 14px; margin: 0 0 14px; font-size: 13.5px; color: #7a1d16; }
 .summary b { display: block; margin-bottom: 4px; }
 .summary a { color: var(--bad); }
+.summary ul { margin: 0; padding-left: 18px; }
+.summary:focus { outline: 2px solid var(--bad); outline-offset: 2px; }
 
 /* overlays */
 .scrim { position: fixed; inset: 0; background: rgba(17,17,17,.42); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; }
