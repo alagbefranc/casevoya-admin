@@ -1243,6 +1243,8 @@ and one full-width primary button. Busy buttons show a spinner inside the button
   `POST /setup/account { fullName, password }`. `422` on `password` with `details.canReset` → warn alert
   "Forgot this account's password?" + **Set a new password**, which switches the card to "Set a new
   password" with a confirm checkbox → `POST /setup/password { fullName, password, confirm: true }`.
+  With `details.unconfirmed` (existing account whose email was never confirmed) the alert reads "This
+  account's email was never confirmed"; only the new-password path continues.
 - **Step 2, authenticator.** On entry `POST /setup/authenticator {}` → `{ mode: "new", factorId, qrCode,
   secret, uri }` (QR image + grouped manual key), `{ mode: "pending" }` (already scanned: just enter the
   code, link "Show a new QR code" → `{ restart: true }`) or `{ mode: "existing" }`. Code input →

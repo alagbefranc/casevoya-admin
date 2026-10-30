@@ -172,6 +172,7 @@ function AccountStep({ s, onDone }: { s: SetupState; onDone: () => void }) {
   const [local, setLocal] = useState<{ fullName?: string; password?: string }>({});
   const min = s.passwordMinLength;
   const canReset = error instanceof ApiFailure && Boolean((error.details as { canReset?: boolean } | null)?.canReset);
+  const unconfirmed = error instanceof ApiFailure && Boolean((error.details as { unconfirmed?: boolean } | null)?.unconfirmed);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -221,8 +222,8 @@ function AccountStep({ s, onDone }: { s: SetupState; onDone: () => void }) {
           <input id="setup-password" className="inp" type="password" autoComplete={exists && !reset ? "current-password" : "new-password"} placeholder={`At least ${min} characters`} value={password} maxLength={200} onChange={(e) => setPassword(e.target.value)} aria-invalid={Boolean(pwErr)} aria-describedby="setup-password-hint setup-password-err" />
         </Field>
         {canReset && !reset ? (
-          <Alert tone="warn" title="Forgot this account's password?">
-            <div>You can set a new one here while setup is still open.</div>
+          <Alert tone="warn" title={unconfirmed ? "This account's email was never confirmed" : "Forgot this account's password?"}>
+            <div>{unconfirmed ? "Set a new password here to take over the account. Any authenticators already on it are removed." : "You can set a new one here while setup is still open."}</div>
             <button type="button" className="btn sm" style={{ marginTop: 8 }} onClick={() => { setReset(true); setError(null); setPassword(""); }}>Set a new password</button>
           </Alert>
         ) : null}

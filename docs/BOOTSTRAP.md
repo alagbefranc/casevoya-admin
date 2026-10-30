@@ -16,8 +16,9 @@ is not open). Nothing on app.casevoya.ca and no script is needed.
 1. **Account.** The work email is read-only and comes from the Cloudflare Access JWT. Enter your full name
    and a password (at least 12 characters, checked in the browser and on the server).
    - If a Casevoya auth user already exists for that email, the password is checked by signing in. A
-     wrong password offers **Set a new password** (only while Setup is open). An unconfirmed email is
-     confirmed.
+     wrong password offers **Set a new password** (only while Setup is open). If the existing user's
+     email is unconfirmed, its password is not accepted and **Set a new password** is required; that
+     path removes every MFA factor on the account, then confirms the email and sets the new password.
    - If no user exists, one is created with the email already confirmed.
    - The full name is saved to `user_metadata.full_name`. You now have the normal portal session
      (cookie `__Host-cv-admin-session`, the same one the Sign-in dialog creates).

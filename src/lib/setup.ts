@@ -72,6 +72,18 @@ export const supabaseSetup: SetupApi = {
     if (error) throw new Error(`auth admin factor delete failed: ${error.message}`);
   },
 
+  async deleteAllFactors(caller, userId) {
+    // Used only when taking over an unconfirmed account: nothing a prior holder enrolled may survive.
+    const listed = await caller.db.auth.admin.mfa.listFactors({ userId });
+    if (listed.error) throw new Error(`auth admin factor list failed: ${listed.error.message}`);
+    const factors = listed.data?.factors ?? [];
+    for (const factor of factors) {
+      const { error } = await caller.db.auth.admin.mfa.deleteFactor({ id: factor.id, userId });
+      if (error) throw new Error(`auth admin factor delete failed: ${error.message}`);
+    }
+    return factors.length;
+  },
+
   async recentBadAttempts(caller, sinceIso) {
     const { count, error } = await caller.db
       .from("audit_log")
