@@ -74,6 +74,7 @@ Audit log, Privacy, Verification, Grants, Sample mode, Migration) · 3 Session a
 | `not_found` | 404 | Unknown id or route | Page-level not-found with a link back to the list. |
 | `method_not_allowed` | 405 | Bug | Same as csrf_failed. |
 | `conflict` | 409 | State changed underneath you (already open draft, pending request exists, resolved notice, already an admin, concurrent update) | Alert with `message` + **Refresh** that reloads the record; keep form input. |
+| `rate_limited` | 429 | Too many wrong passwords or codes in Setup (5 in 15 minutes) | Show `message`; the user waits out the window (3.6). |
 | `upstream_error` | 502 | Database or Supabase failure | "Casevoya's database did not answer. Try again." + **Retry**; keep input. |
 | `internal` | 500 | Configuration or unexpected error | Same as upstream, plus the `requestId` ("Quote this reference: …"). |
 
@@ -119,7 +120,8 @@ Response `data`:
 - `role: null` means the Access user has an **open invite** and nothing else; `invite` is
   `{ id, role, template_reviewer, expires_at, invited_at }`. Render only the invite screen (3.4).
 - If the gate refuses entirely (not on the allow list, no Casevoya account, not an admin and no invite)
-  `/session` returns `403 forbidden` with a message; render the "No access" screen (3.5).
+  `/session` returns `403 forbidden` with a message. Then call `GET /setup`: `200` (no platform admin
+  exists yet) → `router.replace("/setup")` (3.6); anything else → the "No access" screen (3.5).
 - `capabilities` drive what the UI shows **[UI]**; the API enforces the same rules **[API]**:
   - `read`: any admin. Every GET.
   - `operate`: owner or operator. Every POST/PATCH except `/admins*` and `/config/settings/*`.
@@ -1221,27 +1223,52 @@ allow list), plus the Access email and a "Sign out of Access" link (`/cdn-cgi/ac
 internal` or `502 upstream_error` from the gate: "The portal can't check your access right now" with
 retry and the request id.
 
+### 3.6 Setup (first admin, `/setup`)
+
+Design: HANDOFF "Setup (first admin)", screenshots `additions/setup-*`. Shown only while
+`platform_admins` is empty; the AdminApp does not load `/session` on `/setup`. Centred card (456 px), the
+brand line, three progress bars (account, authenticator, finish), title, lede, fields, three check lines
+and one full-width primary button. Busy buttons show a spinner inside the button's flex gap (no overlap at
+390 px).
+
+- **Loading** (`GET /setup` pending): skeleton card. **Error** (5xx/network): "We couldn't check setup",
+  red alert "The server didn't answer · Request <id>. No account was created. Try again in a moment.",
+  **Try again**. **Locked** (`409`, `details.locked`): pill "Setup is locked", "This step is already
+  done", the date from `details.lockedAt`, rows Created through / Logged, "Need another admin? Ask an
+  existing owner to invite you from Config › Admins." and **Sign in to admin** (`/`).
+- `GET /setup` → `{ state: "open", email, step: "account"|"authenticator"|"finish", account: { exists,
+  fullName }, authenticator: { verified, pending }, passwordMinLength: 12, signInAvailable }`.
+- **Step 1, account.** Full name, Work email (read-only, from Access), Password ("At least 12
+  characters"). Button "Create owner account" (no account yet) or "Continue" (account exists).
+  `POST /setup/account { fullName, password }`. `422` on `password` with `details.canReset` → warn alert
+  "Forgot this account's password?" + **Set a new password**, which switches the card to "Set a new
+  password" with a confirm checkbox → `POST /setup/password { fullName, password, confirm: true }`.
+- **Step 2, authenticator.** On entry `POST /setup/authenticator {}` → `{ mode: "new", factorId, qrCode,
+  secret, uri }` (QR image + grouped manual key), `{ mode: "pending" }` (already scanned: just enter the
+  code, link "Show a new QR code" → `{ restart: true }`) or `{ mode: "existing" }`. Code input →
+  `POST /setup/authenticator/verify { code }`; `422` on `code` shows under the field. "Passkeys: coming
+  later." `401 session_required` returns to step 1.
+- **Step 3, finish.** Checkbox "I'm the platform owner and want to finish setup" → `POST /setup/finish
+  { confirm: true }` → "You're the owner", then `router.replace("/")` (Overview).
+- `429 rate_limited` (5 bad passwords/codes in 15 minutes) shows the server message.
+
 ## 4 Walkthroughs
 
 ### 4.1 First-admin bootstrap
 
-Pages: 3.5 No access → 3.2 → Overview. Endpoints: `/session`, `/session/sign-in`.
+Pages: 3.6 Setup → Overview. Endpoints: `/session`, `/setup*`. Details and the script fallback:
+docs/BOOTSTRAP.md.
 
-1. Francis creates (or uses) a Casevoya account for `admin@casevoya.ca`: confirmed email, password,
-   authenticator app (TOTP) verified in Casevoya.
-2. The email must be on the Access policy and in `ADMIN_ALLOWED_EMAILS` (already the case for
-   admin@casevoya.ca), and must have signed in to admin.casevoya.ca once through Access.
-3. Until then every portal page shows **No access** (`/session` → 403 "This user is not a platform
-   admin and has no open invite").
-4. With Francis's go-ahead, an operator on the box runs
-   `bash scripts/with-secrets.sh node scripts/bootstrap-first-admin.mjs` (dry run, prints the checks)
-   and then the same with `--commit`. It refuses unless there are no admins yet, the email is allowed,
-   has an Access sign-in and has a confirmed, TOTP-protected account; it calls
-   `bootstrap_first_platform_admin`, which inserts the **owner** and audits
-   `platform_admin.bootstrapped` **[DB]**. There is no UI for this step **[by design]**.
-5. Reload: `/session` returns `role: "owner"`. Sign in (3.2) to unlock step-up actions.
-6. Next: Config › Admins to invite others (each invitee: Access policy + `ADMIN_ALLOWED_EMAILS` +
-   deploy, then 3.4).
+1. The email must be on the Access policy and in `ADMIN_ALLOWED_EMAILS` (already the case for
+   admin@casevoya.ca).
+2. Francis opens https://admin.casevoya.ca and passes Access. `/session` → 403, `GET /setup` → 200, so
+   the portal goes to `/setup`.
+3. Step 1: name + password (existing account: its password, or set a new one). Step 2: scan the QR,
+   enter the code. Step 3: Finish → `bootstrap_first_platform_admin` inserts the **owner** and audits
+   `platform_admin.bootstrapped` **[DB]**.
+4. Overview loads with `role: "owner"`; the session from Setup is already signed in (aal2).
+5. `/setup` is locked from now on (409). Next: Config › Admins to invite others (each invitee: Access
+   policy + `ADMIN_ALLOWED_EMAILS` + deploy, then 3.4).
 
 ### 4.2 Licence check
 
@@ -1352,6 +1379,12 @@ action (prefixed `admin_portal.`; mutations only).
 
 | Method | Path | Roles | Session | Audit | Page |
 |---|---|---|---|---|---|
+| GET | /setup | setup gate | — | — | 3.6 |
+| POST | /setup/account | setup gate | — | setup.account | 3.6 |
+| POST | /setup/password | setup gate | — | setup.password_reset | 3.6 |
+| POST | /setup/authenticator | setup gate | own (aal1) | setup.authenticator_started | 3.6 |
+| POST | /setup/authenticator/verify | setup gate | own (aal1) | setup.authenticator_verified | 3.6 |
+| POST | /setup/finish | setup gate | own (aal2) | setup.finished | 3.6 |
 | GET | /session | invitee gate | — | — | global |
 | POST | /session/sign-in | invitee gate | — | session.sign_in | 3.2 |
 | POST | /session/step-up | invitee gate | req | session.step_up | 3.3 |

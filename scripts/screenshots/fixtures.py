@@ -372,3 +372,31 @@ def admin_routes():
         "/sample-mode": SAMPLE,
         "/migration/jobs": MIGRATION,
     }
+
+
+# ---------------------------------------------------------------- first-admin Setup (/setup)
+
+def fake_qr_svg():
+    """A deterministic QR-looking pattern (NOT a real code; fixtures only)."""
+    import random
+    rnd = random.Random(7)
+    n, cells = 25, []
+    def finder(x, y):
+        return [(x + i, y + j) for i in range(7) for j in range(7) if i in (0, 6) or j in (0, 6) or (2 <= i <= 4 and 2 <= j <= 4)]
+    fixed = set(finder(0, 0) + finder(18, 0) + finder(0, 18))
+    reserved = {(x + i, y + j) for x, y in ((0, 0), (18, 0), (0, 18)) for i in range(-1, 8) for j in range(-1, 8)}
+    for x in range(n):
+        for y in range(n):
+            if (x, y) in fixed or ((x, y) not in reserved and rnd.random() < 0.45):
+                cells.append(f'<rect x="{x}" y="{y}" width="1" height="1"/>')
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 {n + 2} {n + 2}" shape-rendering="crispEdges"><rect x="-1" y="-1" width="{n + 2}" height="{n + 2}" fill="#fff"/><g fill="#111">{"".join(cells)}</g></svg>'
+    from urllib.parse import quote
+    return "data:image/svg+xml;utf-8," + quote(svg)
+
+
+def setup_state(step="account", exists=True, full_name="Francis Alagbe", verified=False, pending=False):
+    return {"state": "open", "email": "admin@casevoya.ca", "step": step, "account": {"exists": exists, "fullName": full_name if exists else None},
+            "authenticator": {"verified": verified, "pending": pending}, "passwordMinLength": 12, "signInAvailable": True}
+
+
+SETUP_ENROL = {"mode": "new", "factorId": uid(990), "qrCode": fake_qr_svg(), "secret": "JBSWY3DPEHPK3PXPFAKEFIXTURE", "uri": "otpauth://totp/Casevoya%20admin:admin@casevoya.ca?secret=FAKE"}

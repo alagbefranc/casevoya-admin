@@ -100,3 +100,26 @@ SCENARIOS += [
     {"name": "59-state-validation", "url": f"/grants?request={fx.uid(6)}", "errors": {"POST /support/requests": GRANT_422}, "steps": [
         ("fill", ("#g-name", "Jordan Reid")), ("fill", ("#g-reason", "Owner asked us to check a failed upload.")), ("click", ".drawer .check input"), ("click", "button:has-text('Send request')"), ("wait", 500)], "full": False},
 ]
+
+# First-admin Setup (/setup). GET /setup decides the step; the server locks it (409) once an admin exists.
+SETUP_LOCKED = (409, {"error": {"code": "conflict", "message": "Setup is locked: the first platform admin already exists. Ask an owner to invite you.", "details": {"locked": True, "lockedAt": "2026-10-30T19:05:00Z"}, "requestId": "req_example_0409"}})
+SETUP_DOWN = (502, {"error": {"code": "upstream_error", "message": "Database did not answer", "requestId": "req_example_0502"}})
+SETUP_BAD_PW = (422, {"error": {"code": "validation_failed", "message": "That password was not accepted for this account", "details": {"issues": [{"path": "password", "message": "That password was not accepted for this account"}], "canReset": True}, "requestId": "req_example_0422p"}})
+SETUP_BAD_CODE = (422, {"error": {"code": "validation_failed", "message": "That code was not accepted", "details": {"issues": [{"path": "code", "message": "That code was not accepted"}]}, "requestId": "req_example_0422c"}})
+
+SCENARIOS += [
+    {"name": "setup-0-root-redirect", "url": "/", "errors": {"GET /session": FORBIDDEN}, "routes": {"/setup": fx.setup_state()}, "wait": ".box.setup h1", "settle": 1500},
+    {"name": "setup-1-account", "url": "/setup", "routes": {"/setup": fx.setup_state()}},
+    {"name": "setup-1-account-new", "url": "/setup", "routes": {"/setup": fx.setup_state(exists=False)}, "steps": [("fill", ("#setup-name", "Francis Alagbe"))]},
+    {"name": "setup-1-wrong-password", "url": "/setup", "routes": {"/setup": fx.setup_state()}, "errors": {"POST /setup/account": SETUP_BAD_PW}, "steps": [("fill", ("#setup-password", "not the right one")), ("click", "button:has-text('Continue')"), ("wait", 500)]},
+    {"name": "setup-1-reset", "url": "/setup", "routes": {"/setup": fx.setup_state()}, "errors": {"POST /setup/account": SETUP_BAD_PW}, "steps": [("fill", ("#setup-password", "not the right one")), ("click", "button:has-text('Continue')"), ("wait", 400), ("click", "button:has-text('Set a new password')"), ("wait", 200)]},
+    {"name": "setup-2-authenticator", "url": "/setup", "routes": {"/setup": fx.setup_state("authenticator"), "POST /setup/authenticator": fx.SETUP_ENROL}, "wait": "img.qr"},
+    {"name": "setup-2-bad-code", "url": "/setup", "routes": {"/setup": fx.setup_state("authenticator"), "POST /setup/authenticator": fx.SETUP_ENROL}, "errors": {"POST /setup/authenticator/verify": SETUP_BAD_CODE}, "wait": "img.qr", "steps": [("fill", ("#setup-code", "000000")), ("click", "button:has-text('Verify and continue')"), ("wait", 400)]},
+    {"name": "setup-2-pending", "url": "/setup", "routes": {"/setup": fx.setup_state("authenticator", pending=True), "POST /setup/authenticator": {"mode": "pending"}}},
+    {"name": "setup-3-finish", "url": "/setup", "routes": {"/setup": fx.setup_state("finish", verified=True)}, "steps": [("click", ".check input")]},
+    {"name": "setup-3-done", "url": "/setup", "routes": {"/setup": fx.setup_state("finish", verified=True), "POST /setup/finish": {"done": True, "userId": fx.uid(1), "role": "owner"}}, "steps": [("click", ".check input"), ("click", "button:has-text('Finish setup')"), ("wait", 300)]},
+    {"name": "setup-locked", "url": "/setup", "errors": {"GET /setup": SETUP_LOCKED}},
+    {"name": "setup-error", "url": "/setup", "errors": {"GET /setup": SETUP_DOWN}},
+    {"name": "setup-error-retrying", "url": "/setup", "errors": {"GET /setup": SETUP_DOWN}, "steps": [("fail", ("GET /setup", (200, "HANG"))), ("click", "button:has-text('Try again')"), ("wait", 300)]},
+    {"name": "setup-loading", "url": "/setup", "errors": {"GET /setup": (200, "HANG")}, "wait": ".box.setup", "settle": 600},
+]

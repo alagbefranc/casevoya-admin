@@ -2,17 +2,21 @@ import { requireCaller } from "@/lib/guard";
 import { handle, type ApiDeps } from "@/lib/api/core";
 import { ENDPOINTS } from "@/lib/api/registry";
 import { signIn, signOut, sessionStatus, stepUp, userSessionClient } from "@/lib/session";
+import { supabaseSetup } from "@/lib/setup";
 
 /**
  * /api/admin/* — the admin portal's JSON API. Every request passes the Access + platform_admins gate in
  * handle() (see src/lib/api/core.ts and docs/FRONTEND-SPEC.md). Cloudflare Access also sits in front of the
  * whole hostname, so a request without an Access session never reaches this code (it gets a 302 to sign in).
+ * The first-admin Setup endpoints (/api/admin/setup*) pass the setup gate instead (Access + allow list + an empty
+ * platform_admins table), see src/lib/api/modules/setup.ts.
  */
 export const dynamic = "force-dynamic";
 
 const deps: ApiDeps = {
   gate: (mode) => requireCaller(mode),
   sessions: { status: sessionStatus, signIn, stepUp, signOut, client: userSessionClient },
+  setup: supabaseSetup,
 };
 
 const run = (request: Request) => handle(request, ENDPOINTS, deps);

@@ -66,6 +66,8 @@ for (const file of walk(SRC)) {
   if (/SUPABASE_SECRET_KEY/.test(text) && rel !== path.join("src", "lib", "env.ts")) problems.push(`${rel}: reads SUPABASE_SECRET_KEY outside src/lib/env.ts`);
   if (/^\s*["']use client["']/.test(text) && /@\/lib\/(guard|supabase|env|reviewer|session|data|api)/.test(text)) problems.push(`${rel}: a client component imports server-only admin code`);
   for (const match of text.matchAll(/\.from\(\s*["'`]([a-z_]+)["'`]\s*\)/g)) {
+    // First-admin Setup lockout counts its own failed admin_portal.setup.* rows (src/lib/setup.ts only).
+    if (match[1] === "audit_log" && rel === path.join("src", "lib", "setup.ts")) continue;
     if (!READABLE.has(match[1])) problems.push(`${rel}: reads table ${match[1]}, which is not on the platform-operations allow list`);
   }
   if (/\.(insert|update|upsert|delete)\(/.test(text)) problems.push(`${rel}: writes a table directly; use a named database function (rpc) instead`);

@@ -1,7 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
-import type { AdminContext, InviteeContext } from "./guard";
+import type { AdminEnv } from "./env";
 import { peekJwt } from "./templates";
 
 /**
@@ -26,7 +26,8 @@ export class SessionError extends Error {
   }
 }
 
-type Caller = AdminContext | InviteeContext;
+/** Whose session this is: the Access email and its auth user (admins, invitees, and the first-admin Setup). */
+type Caller = { env: AdminEnv; email: string; userId: string };
 
 export type SessionStatus = {
   signedIn: boolean;
@@ -185,4 +186,56 @@ export async function signOut(caller: Caller): Promise<void> {
   const client = userClient(caller);
   const { error } = await client.auth.setSession({ access_token: tokens.a, refresh_token: tokens.r });
   if (!error) await client.auth.signOut({ scope: "local" });
+}
+
+// ------------------------------------------------------------------ first-admin Setup (src/lib/api/modules/setup.ts)
+
+/**
+ * Setup step 1: password-only sign-in for the Access user. Stores the same session cookie as signIn (aal1 until
+ * the authenticator is verified). Throws bad_credentials when the password is not accepted.
+ */
+export async function signInWithPasswordOnly(caller: Caller, password: string): Promise<SessionStatus> {
+  const client = userClient(caller);
+  const { data, error } = await client.auth.signInWithPassword({ email: caller.email, password });
+  if (error || !data.session) throw new SessionError("bad_credentials", "That password was not accepted.");
+  if (data.user?.id !== caller.userId) {
+    await client.auth.signOut({ scope: "local" });
+    throw new SessionError("mismatch", "That Supabase user is not the user behind your Access sign-in.");
+  }
+  await store(data.session);
+  return describeToken(data.session.access_token, caller.userId);
+}
+
+/** The stored session for the Access user, re-validated with Supabase, or null when there is none or it ended. */
+export async function setupSessionStatus(caller: Caller): Promise<SessionStatus | null> {
+  if (!(await readTokens())) return null;
+  try {
+    const { session } = await restore(caller);
+    await store(session);
+    return describeToken(session.access_token, caller.userId);
+  } catch (error) {
+    if (error instanceof SessionError && error.kind !== "unavailable") return null;
+    throw error;
+  }
+}
+
+export type TotpEnrolment = { factorId: string; qrCode: string; secret: string; uri: string };
+
+/** Setup step 2: enrols a new TOTP factor on the user's own session. The secret goes to the browser only. */
+export async function enrolTotp(caller: Caller): Promise<TotpEnrolment> {
+  const { client } = await restore(caller);
+  const { data, error } = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "Casevoya admin", issuer: "Casevoya admin" });
+  if (error || !data || data.type !== "totp") throw new SessionError("unavailable", `Could not start the authenticator setup${error ? `: ${error.message}` : ""}.`);
+  return { factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret, uri: data.totp.uri };
+}
+
+/** Setup step 2: verifies a code for a factor (first verification of a new factor, or an existing one) and stores the aal2 session. */
+export async function verifyTotp(caller: Caller, factorId: string, code: string): Promise<SessionStatus> {
+  const { client } = await restore(caller);
+  const { error } = await client.auth.mfa.challengeAndVerify({ factorId, code });
+  if (error) throw new SessionError("bad_code", "That authenticator code was not accepted.");
+  const { data } = await client.auth.getSession();
+  if (!data.session) throw new SessionError("unavailable", "The authenticator check did not return a session.");
+  await store(data.session);
+  return describeToken(data.session.access_token, caller.userId);
 }
