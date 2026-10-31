@@ -33,6 +33,42 @@ export class SessionError extends Error {
   }
 }
 
+/** The fields of a supabase-js AuthError the portal looks at. */
+type AuthFailure = { name?: string; status?: number; code?: string; message?: string };
+
+/**
+ * What a Supabase Auth refusal of a password or authenticator code means:
+ * - "invalid": Auth checked the secret and it was wrong (counted as a bad attempt);
+ * - "unavailable": Auth did not decide (rate limited, server error, network), so nothing was tried (not counted);
+ * - "refused": any other refusal. Still counted as a bad attempt so the lockout stays fail-closed.
+ */
+export function classifyAuthFailure(error: AuthFailure | null | undefined, secret: "password" | "code"): "invalid" | "unavailable" | "refused" {
+  if (!error) return "unavailable";
+  const status = typeof error.status === "number" ? error.status : 0;
+  if (error.name === "AuthRetryableFetchError" || status === 0 || status === 429 || status >= 500) return "unavailable";
+  const code = typeof error.code === "string" ? error.code : "";
+  const message = typeof error.message === "string" ? error.message : "";
+  const invalid =
+    secret === "password"
+      ? code === "invalid_credentials" || /invalid login credentials/i.test(message)
+      : code === "mfa_verification_failed" || /invalid (totp |mfa )?code/i.test(message);
+  return invalid ? "invalid" : "refused";
+}
+
+const AUTH_UNAVAILABLE_MESSAGE = "Casevoya sign-in did not answer. Wait a minute, then try again.";
+
+/** The SessionError for a password or code Supabase Auth did not accept (no secret is ever logged). */
+function secretNotAccepted(error: AuthFailure | null | undefined, secret: "password" | "code", message: string): SessionError {
+  const verdict = classifyAuthFailure(error, secret);
+  const facts = { secret, status: error?.status ?? null, code: error?.code ?? null };
+  if (verdict === "unavailable") {
+    console.error("admin session: Supabase Auth unavailable", facts);
+    return new SessionError("unavailable", AUTH_UNAVAILABLE_MESSAGE);
+  }
+  if (verdict === "refused") console.error("admin session: unrecognised Auth refusal, counted as a bad attempt", facts);
+  return new SessionError(secret === "password" ? "bad_credentials" : "bad_code", message);
+}
+
 /** Whose session this is: the Access email and its auth user (admins, invitees, and the first-admin Setup). */
 type Caller = { env: AdminEnv; email: string; userId: string };
 
@@ -191,7 +227,7 @@ async function verifiedTotpFactor(client: SupabaseClient): Promise<string> {
 async function verifyCode(client: SupabaseClient, code: string): Promise<Session> {
   const factorId = await verifiedTotpFactor(client);
   const { error } = await client.auth.mfa.challengeAndVerify({ factorId, code });
-  if (error) throw new SessionError("bad_code", "That authenticator code was not accepted.");
+  if (error) throw secretNotAccepted(error, "code", "That authenticator code was not accepted.");
   const { data } = await client.auth.getSession();
   if (!data.session) throw new SessionError("unavailable", "The step-up did not return a session.");
   return data.session;
@@ -201,7 +237,7 @@ async function verifyCode(client: SupabaseClient, code: string): Promise<Session
 export async function signIn(caller: Caller, password: string, code: string): Promise<SessionStatus> {
   const client = userClient(caller);
   const { data, error } = await client.auth.signInWithPassword({ email: caller.email, password });
-  if (error || !data.session) throw new SessionError("bad_credentials", "Email or password was not accepted.");
+  if (error || !data.session) throw secretNotAccepted(error, "password", "Email or password was not accepted.");
   if (data.user?.id !== caller.userId) {
     await client.auth.signOut({ scope: "local" });
     throw new SessionError("mismatch", "That Supabase user is not the user behind your Access sign-in.");
@@ -278,7 +314,7 @@ export async function signOut(caller: Caller): Promise<void> {
 export async function signInWithPasswordOnly(caller: Caller, password: string): Promise<SessionStatus> {
   const client = userClient(caller);
   const { data, error } = await client.auth.signInWithPassword({ email: caller.email, password });
-  if (error || !data.session) throw new SessionError("bad_credentials", "That password was not accepted.");
+  if (error || !data.session) throw secretNotAccepted(error, "password", "That password was not accepted.");
   if (data.user?.id !== caller.userId) {
     await client.auth.signOut({ scope: "local" });
     throw new SessionError("mismatch", "That Supabase user is not the user behind your Access sign-in.");
@@ -317,7 +353,7 @@ export async function enrolTotp(caller: Caller): Promise<TotpEnrolment> {
 export async function verifyTotp(caller: Caller, factorId: string, code: string): Promise<SessionStatus> {
   const { client, endsAt } = await restore(caller);
   const { error } = await client.auth.mfa.challengeAndVerify({ factorId, code });
-  if (error) throw new SessionError("bad_code", "That authenticator code was not accepted.");
+  if (error) throw secretNotAccepted(error, "code", "That authenticator code was not accepted.");
   const { data } = await client.auth.getSession();
   if (!data.session) throw new SessionError("unavailable", "The authenticator check did not return a session.");
   await store(data.session, endsAt);

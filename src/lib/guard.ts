@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { ACCESS_HEADER, AccessDenied, verifyAccessJwt, type AccessIdentity } from "./access";
 import { ConfigError, readEnv, type AdminEnv } from "./env";
 import { authUserIdByEmail, serviceClient } from "./supabase";
+import { RATE_LIMITED_MESSAGE, RATE_LIMIT_RETRY_AFTER_SECONDS, gateLimits, rateLimit, type Limiter } from "./rate-limit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type AdminRole = "owner" | "operator" | "viewer";
@@ -44,13 +45,14 @@ export type GateReason =
   | "email_not_allowed"
   | "no_auth_user"
   | "not_platform_admin"
-  | "lookup_failed";
+  | "lookup_failed"
+  | "rate_limited";
 
 export class AdminDenied extends Error {
   constructor(
     readonly reason: GateReason,
     message: string,
-    /** Safe, non-secret facts for the client (only the setup_locked refusal uses it). */
+    /** Safe, non-secret facts for the client (setup_locked and rate_limited refusals). */
     readonly details?: Record<string, unknown>,
   ) {
     super(message);
@@ -66,6 +68,9 @@ export type GateDeps = {
   /** The caller's platform_admins row, or null. */
   adminRecord?: (db: SupabaseClient, userId: string) => Promise<AdminRecord | null>;
   makeClient?: (env: AdminEnv) => SupabaseClient;
+  /** The API request being gated (method and path under /api/admin). When set, the per-caller rate limits apply. */
+  request?: { method: string; path: string };
+  limiter?: Limiter;
 };
 
 export async function platformAdminRow(db: SupabaseClient, userId: string): Promise<AdminRecord | null> {
@@ -139,6 +144,7 @@ export async function evaluateSetupGate(
   deps: GateDeps & { countAdmins?: (db: SupabaseClient) => Promise<{ count: number; firstAt: string | null }> },
 ): Promise<SetupContext> {
   const identity = await verifyIdentity(deps);
+  await throttle(deps, identity);
   const db = (deps.makeClient ?? serviceClient)(deps.env);
   let admins: { count: number; firstAt: string | null };
   try {
@@ -171,8 +177,20 @@ async function verifyIdentity(deps: GateDeps): Promise<AccessIdentity> {
   }
 }
 
+/** Per-caller rate limits for API requests, checked on the verified identity before any Auth or database lookup. */
+async function throttle(deps: GateDeps, identity: AccessIdentity): Promise<void> {
+  if (!deps.request) return;
+  const limiter = deps.limiter ?? rateLimit;
+  for (const [name, key] of gateLimits(deps.request.method, deps.request.path, identity)) {
+    if (!(await limiter(name, key))) {
+      throw new AdminDenied("rate_limited", RATE_LIMITED_MESSAGE, { retryAfterSeconds: RATE_LIMIT_RETRY_AFTER_SECONDS });
+    }
+  }
+}
+
 async function identify(deps: GateDeps): Promise<{ identity: AccessIdentity; userId: string; db: SupabaseClient }> {
   const identity = await verifyIdentity(deps);
+  await throttle(deps, identity);
   let userId: string | null;
   try {
     userId = await (deps.lookupUser ?? authUserIdByEmail)(deps.env, identity.email);
@@ -196,7 +214,10 @@ export async function requireAdmin(): Promise<AdminContext> {
 }
 
 /** For the API: the admin gate, the invitee gate (admins and people with an open invite), or the first-admin setup gate. */
-export async function requireCaller(mode: "admin" | "invitee" | "setup"): Promise<AdminContext | InviteeContext | SetupContext> {
+export async function requireCaller(
+  mode: "admin" | "invitee" | "setup",
+  request?: { method: string; path: string },
+): Promise<AdminContext | InviteeContext | SetupContext> {
   let env: AdminEnv;
   try {
     env = readEnv();
@@ -204,8 +225,8 @@ export async function requireCaller(mode: "admin" | "invitee" | "setup"): Promis
     throw new AdminDenied("config", error instanceof ConfigError ? error.message : "Configuration error");
   }
   const token = (await headers()).get(ACCESS_HEADER);
-  if (mode === "setup") return evaluateSetupGate({ token, env });
-  return mode === "invitee" ? evaluateInviteeGate({ token, env }) : evaluateGate({ token, env });
+  if (mode === "setup") return evaluateSetupGate({ token, env, request });
+  return mode === "invitee" ? evaluateInviteeGate({ token, env, request }) : evaluateGate({ token, env, request });
 }
 
 /** For pages: the same checks, returned as a result so the page can explain a refusal. */

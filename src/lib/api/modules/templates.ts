@@ -41,6 +41,9 @@ export const draftInput = z.object({
 
 export const reviseInput = z.object({ id: uuid, ...content });
 
+/** A template at its schema maximums (80 items, 20 sources) can exceed the default 64 KB body cap. */
+const TEMPLATE_MAX_BODY_BYTES = 256 * 1024;
+
 async function versionDetail(db: SupabaseClient, id: string): Promise<VersionDetail> {
   return must(await rpc<VersionDetail | null>(db, "platform_template_version", { p_version_id: id }), "Template version");
 }
@@ -235,6 +238,7 @@ export const templateEndpoints = [
     summary: "Write a new draft version (you are the author) with its sources.",
     roles: OPERATORS,
     input: draftInput,
+    maxBodyBytes: TEMPLATE_MAX_BODY_BYTES,
     status: 201,
     audit: { action: "templates.draft_created", table: "public.shared_template_versions" },
     async handler({ db, input, audit, admin }) {
@@ -261,6 +265,7 @@ export const templateEndpoints = [
     summary: "Revise your own open draft (content and sources).",
     roles: OPERATORS,
     input: reviseInput,
+    maxBodyBytes: TEMPLATE_MAX_BODY_BYTES,
     audit: { action: "templates.draft_revised", table: "public.shared_template_versions" },
     async handler({ db, input, admin }) {
       const current = await versionDetail(db, input.id);

@@ -5,6 +5,7 @@ import { AdminDenied } from "../guard";
 import type { SessionStatus } from "../session";
 import type { SetupApi } from "./modules/setup";
 import { ApiError, STEP_UP_MESSAGE, auditResultFor, fromDbError, redact, zodDetails, type DbError, type ErrorCode } from "./errors";
+import { RATE_LIMITED_MESSAGE, RATE_LIMIT_RETRY_AFTER_SECONDS, callerKey, type Limiter } from "../rate-limit";
 
 /**
  * The /api/admin/* framework: one table of endpoint definitions, each with its method, path, allowed roles,
@@ -48,7 +49,10 @@ export const CODE_MAX_BAD_ATTEMPTS = 5;
 export const CODE_LOCKOUT_MINUTES = 15;
 
 export type ApiDeps = {
-  gate(mode: GateMode): Promise<Caller>;
+  /** The gate for this request; `request` (method, path under /api/admin) lets it apply the per-caller rate limits. */
+  gate(mode: GateMode, request?: { method: string; path: string }): Promise<Caller>;
+  /** Extra per-caller limits for sensitive endpoints (src/lib/rate-limit.ts). When absent none are applied (tests). */
+  rateLimit?: Limiter;
   sessions: SessionApi;
   /** Attempt lockout for authenticator codes and sign-in passwords. When absent no lockout is applied (tests only; the route always sets it). */
   attempts?: AttemptStore;
@@ -112,6 +116,10 @@ export type Endpoint<I = unknown> = {
   reviewer?: boolean;
   /** Every non-GET endpoint has one. Recorded as admin_portal.<action>. */
   audit?: { action: string; table?: string };
+  /** Also counts against the ADMIN_SENSITIVE rate limit (decided from the validated input). */
+  sensitive?: boolean | ((input: I) => boolean);
+  /** Largest accepted request body in bytes (default MAX_BODY_BYTES). */
+  maxBodyBytes?: number;
   status?: 200 | 201;
   handler(ctx: HandlerCtx<I>): Promise<unknown>;
 };
@@ -194,6 +202,7 @@ function queryObject(url: URL): Record<string, unknown> {
 const GATE_STATUS: Record<string, ErrorCode> = {
   no_access_jwt: "unauthenticated",
   bad_access_jwt: "unauthenticated",
+  rate_limited: "rate_limited",
   email_not_allowed: "forbidden",
   no_auth_user: "forbidden",
   not_platform_admin: "forbidden",
@@ -240,10 +249,51 @@ function json(body: unknown, status: number, requestId: string): Response {
   });
 }
 
+/** Seconds a refused (429) caller should wait: details.retryAfterSeconds, else retryAfterMinutes, else the throttle period. */
+export function retryAfterSeconds(error: ApiError): number {
+  const details = (error.details ?? {}) as { retryAfterSeconds?: unknown; retryAfterMinutes?: unknown };
+  const seconds = typeof details.retryAfterSeconds === "number" && details.retryAfterSeconds > 0 ? details.retryAfterSeconds : typeof details.retryAfterMinutes === "number" && details.retryAfterMinutes > 0 ? details.retryAfterMinutes * 60 : RATE_LIMIT_RETRY_AFTER_SECONDS;
+  return Math.max(1, Math.ceil(seconds));
+}
+
 export function errorResponse(error: ApiError, requestId: string, extraHeaders?: Record<string, string>): Response {
   const response = json({ error: { code: error.code, message: error.message, ...(error.details === undefined ? {} : { details: error.details }), requestId } }, error.status, requestId);
+  if (error.status === 429) response.headers.set("retry-after", String(retryAfterSeconds(error)));
   for (const [k, v] of Object.entries(extraHeaders ?? {})) response.headers.set(k, v);
   return response;
+}
+
+/** Default cap on a request body (bytes). Endpoints that take files set maxBodyBytes. */
+export const MAX_BODY_BYTES = 64 * 1024;
+
+/**
+ * Reads the body as UTF-8 text, or returns null once it is larger than `maxBytes`. A declared content-length
+ * over the cap is refused without reading; the stream is counted as it is read either way.
+ */
+export async function readCappedText(request: Request, maxBytes: number): Promise<string | null> {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && /^\d+$/.test(declared.trim()) && Number(declared) > maxBytes) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -269,7 +319,7 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
   // 1. Access JWT + platform_admins (or an open invite for invitee endpoints). Refusals are logged (no secrets).
   let caller: Caller;
   try {
-    caller = await deps.gate(endpoint.gate ?? "admin");
+    caller = await deps.gate(endpoint.gate ?? "admin", { method: request.method.toUpperCase(), path });
   } catch (error) {
     if (error instanceof AdminDenied) {
       const internal = error.reason === "config" || error.reason === "lookup_failed";
@@ -354,7 +404,12 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
     // 4. Input.
     let raw: Record<string, unknown> = mutation ? {} : queryObject(url);
     if (mutation) {
-      const text = await request.text();
+      const maxBytes = endpoint.maxBodyBytes ?? MAX_BODY_BYTES;
+      const text = await readCappedText(request, maxBytes);
+      if (text === null) {
+        const limit = maxBytes >= 1024 * 1024 ? `${Math.floor(maxBytes / (1024 * 1024))} MB` : `${Math.floor(maxBytes / 1024)} KB`;
+        return fail(new ApiError("payload_too_large", `The request body is larger than ${limit}`, { maxBytes }));
+      }
       if (text.trim()) {
         try {
           const parsed = JSON.parse(text) as unknown;
@@ -376,6 +431,13 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
     if (endpoint.auditObjectId) {
       const objectId = endpoint.auditObjectId(caller, parsed.data);
       if (objectId) audit.objectId = objectId;
+    }
+
+    // 4a. Sensitive actions also count against a tighter per-caller limit (fails open; see src/lib/rate-limit.ts).
+    const sensitive = typeof endpoint.sensitive === "function" ? endpoint.sensitive(parsed.data) : Boolean(endpoint.sensitive);
+    if (sensitive && deps.rateLimit && !(await deps.rateLimit("ADMIN_SENSITIVE", callerKey(caller)))) {
+      log("admin api sensitive rate limit reached", { requestId, endpoint: endpointName });
+      return fail(new ApiError("rate_limited", RATE_LIMITED_MESSAGE, { retryAfterSeconds: RATE_LIMIT_RETRY_AFTER_SECONDS }));
     }
 
     // 5. Own session / step-up pre-check. The cookie is not trusted on its own: user-session functions re-check in

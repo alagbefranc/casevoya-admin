@@ -12,19 +12,27 @@ page, with request/response shapes, rules and workflows, is **docs/FRONTEND-SPEC
    The first-admin Setup endpoints (`/setup*`) use the setup gate instead: Access + allow list + an
    **empty** `platform_admins` table (`409 conflict`, `details.locked`, once it is not); see
    docs/BOOTSTRAP.md.
+   Right after the Access JWT verifies (before any Auth or database lookup) the per-caller Workers rate
+   limits apply (`src/lib/rate-limit.ts`, bindings in `wrangler.jsonc`): GET 120/min, other methods
+   20/min, keyed on the Access subject; `/setup*` also 10/min per Access email. Support-request creation
+   and real CICC imports also count against 5/min. Refusals answer `429 rate_limited` with
+   `Retry-After: 60`. The throttle fails open when the binding is missing or errors.
 3. Mutations (POST/PATCH/PUT/DELETE): `Origin` must equal `ADMIN_ORIGIN` and `Content-Type` must be
    `application/json`, else `403 csrf_failed`.
 4. Role: GETs any role (owner, operator, viewer); mutations owner/operator; `/admins*` and
    `PATCH /config/settings/:key` owner only.
 5. Template decisions: `platform_admins.template_reviewer` must be true.
-6. Input: zod; `422 validation_failed` with `details.issues[{path, message}]`.
+6. Input: bodies over 64 KB (template drafts 256 KB, `POST /licences/cicc-imports` 10 MB) answer
+   `413 payload_too_large`; then zod, `422 validation_failed` with `details.issues[{path, message}]`.
 7. Own session: some endpoints run as the admin's own Supabase session (cookie
    `__Host-cv-admin-session`, 1 h). Missing or not the Access user: `401 session_required`. Step-up
    endpoints need a TOTP within 15 minutes, or a `code` in the body: else `403 step_up_required`.
    A request carrying a `code` (sign-in also carries the password) first reserves an attempt with the
    service-role function `platform_admin_reserve_attempt` (main-app migration) and resolves it with
    `platform_admin_resolve_attempt`; after 5 failed or unresolved attempts in 15 minutes it answers
-   `429 rate_limited` (`details.retryAfterSeconds`), and `502` when no reservation can be made.
+   `429 rate_limited` (`details.retryAfterSeconds`, also sent as `Retry-After`), and `502` when no
+   reservation can be made. Only a password or code Supabase Auth rejected counts as failed; Auth being
+   rate limited, erroring or unreachable answers `502` and does not count.
 8. Handler, then an audit entry (`platform_admin_record_audit`, action `admin_portal.<area>.<verb>`) for
    every mutation, including denied and failed attempts.
 

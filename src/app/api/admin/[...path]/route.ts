@@ -4,6 +4,7 @@ import { ENDPOINTS } from "@/lib/api/registry";
 import { signIn, signOut, sessionStatus, stepUp, userSessionClient } from "@/lib/session";
 import { supabaseSetup } from "@/lib/setup";
 import { rpcAttemptStore } from "@/lib/lockout";
+import { rateLimit } from "@/lib/rate-limit";
 
 /**
  * /api/admin/* — the admin portal's JSON API. Every request passes the Access + platform_admins gate in
@@ -15,7 +16,8 @@ import { rpcAttemptStore } from "@/lib/lockout";
 export const dynamic = "force-dynamic";
 
 const deps: ApiDeps = {
-  gate: (mode) => requireCaller(mode),
+  gate: (mode, request) => requireCaller(mode, request),
+  rateLimit: (name, key) => rateLimit(name, key),
   sessions: { status: sessionStatus, signIn, stepUp, signOut, client: userSessionClient },
   setup: supabaseSetup,
   attempts: rpcAttemptStore,

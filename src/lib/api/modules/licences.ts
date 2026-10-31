@@ -134,6 +134,9 @@ export const licenceEndpoints = [
     session: (input) => (input.dryRun ? "none" : "step_up"),
     serviceStepUp: true,
     auditRequired: (input) => !input.dryRun,
+    sensitive: (input) => !input.dryRun,
+    // The CSV (up to 8 MB) travels inside the JSON body.
+    maxBodyBytes: 10 * 1024 * 1024,
     audit: { action: "licences.cicc_import", table: "public.cicc_register_imports" },
     async handler({ db, input, audit, admin }) {
       let parsed: ReturnType<typeof readCiccCsv>;
