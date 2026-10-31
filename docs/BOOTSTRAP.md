@@ -16,7 +16,8 @@ is not open). Nothing on app.casevoya.ca and no script is needed.
 1. **Account.** The work email is read-only and comes from the Cloudflare Access JWT. Enter your full name
    and a password (at least 12 characters, checked in the browser and on the server).
    - If a Casevoya auth user already exists for that email, the password is checked by signing in. A
-     wrong password offers **Set a new password** (only while Setup is open). If the existing user's
+     wrong password offers **Set a new password** (only while Setup is open, and not for an account that
+     already has a verified authenticator: reset that password with Casevoya's reset email). If the existing user's
      email is unconfirmed, its password is not accepted and **Set a new password** is required; that
      path removes every MFA factor on the account, then confirms the email and sets the new password.
    - If no user exists, one is created with the email already confirmed.
@@ -39,8 +40,11 @@ After that `/setup` shows **Setup is locked** for good, and every Setup endpoint
 - Every `/api/admin/setup*` request needs a valid Access JWT for an allowed email (`401`/`403` otherwise)
   and an empty `platform_admins` table (`409` otherwise). Mutations also pass the usual CSRF check.
 - Lockout: 5 wrong passwords or codes for the Access email within 15 minutes answer `429 rate_limited`
-  until the window passes. Attempts are counted from the portal's own audit rows
-  (`admin_portal.setup.*`, result `failure`, `context.setup_bad_attempt`), so it holds across Workers.
+  until the window passes. Once the auth user exists, every password or code request first reserves an
+  attempt atomically for that user id (`platform_admin_reserve_attempt`, the same store as admin sign-in)
+  and is refused if the reservation cannot be written. The portal's own audit rows (`admin_portal.setup.*`,
+  result `failure`, `context.setup_bad_attempt`) are also counted per Access email, and a failed count
+  refuses the request.
 - Audit (`platform_admin_record_audit`): `admin_portal.setup.account`, `.password_reset`,
   `.authenticator_started`, `.authenticator_verified`, `.finished`, including failed and denied attempts.
   Context carries the Access email and the request id, never a password, code or TOTP secret.

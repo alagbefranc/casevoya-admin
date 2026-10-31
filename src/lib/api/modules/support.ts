@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ALL_ROLES, OPERATORS, defineEndpoint, must, rpc } from "../core";
 import { fromDbError } from "../errors";
-import { limit, offset, reason, uuid } from "../schemas";
+import { limit, offset, optionalCode, reason, uuid } from "../schemas";
 
 export const SUPPORT_SCOPES = ["firm_settings", "matter_documents", "matter_records", "matter_all"] as const;
 export const SUPPORT_STATES = ["pending", "active", "closed"] as const;
@@ -21,6 +21,7 @@ export const supportRequestInput = z
     reason: reason(8, 1000),
     minutes: z.number().int().min(15, "Support access lasts 15 to 240 minutes").max(240, "Support access lasts 15 to 240 minutes").default(60),
     confirmFirmNotified: z.literal(true, { message: "Confirm the firm's owners will be emailed and must approve" }),
+    code: optionalCode,
   })
   .superRefine((v, ctx) => {
     if (v.scope === "firm_settings" && v.matterId) ctx.addIssue({ code: "custom", path: ["matterId"], message: "Firm settings access names no matter" });
@@ -64,9 +65,13 @@ export const supportEndpoints = [
   defineEndpoint({
     method: "POST",
     path: "/support/requests",
-    summary: "Ask a firm for time-limited support access. The firm's owners are emailed and must approve in Casevoya.",
+    summary:
+      "Ask a firm for time-limited support access. The firm's owners are emailed and must approve in Casevoya. Fresh step-up, proven to the database with your own session first.",
     roles: OPERATORS,
     input: supportRequestInput,
+    session: "step_up",
+    serviceStepUp: true,
+    auditRequired: true,
     sensitive: true,
     status: 201,
     audit: { action: "support.request_created", table: "public.support_access_requests" },
@@ -92,9 +97,12 @@ export const supportEndpoints = [
   defineEndpoint({
     method: "POST",
     path: "/support/requests/:id/cancel",
-    summary: "Withdraw a pending request, or end an approved grant early.",
+    summary: "Withdraw a pending request, or end an approved grant early. Fresh step-up, proven to the database with your own session first.",
     roles: OPERATORS,
-    input: z.object({ id: uuid, reason: reason(3, 500) }),
+    input: z.object({ id: uuid, reason: reason(3, 500), code: optionalCode }),
+    session: "step_up",
+    serviceStepUp: true,
+    auditRequired: true,
     audit: { action: "support.request_cancelled", table: "public.support_access_requests" },
     async handler({ db, input, audit }) {
       const { data, error } = await db.from("support_access_requests").select("id, organization_id, status").eq("id", input.id).maybeSingle();

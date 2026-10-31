@@ -215,7 +215,7 @@ describe("ADMIN_SENSITIVE: support requests and real CICC imports", () => {
 
   it("creates the support request while under the limit", async () => {
     const limiter = recordingLimiter();
-    const d = { ...deps({ db: fakeDb({ create_support_access_request: ID }) }), rateLimit: limiter };
+    const d = { ...deps({ session: "fresh", db: fakeDb({ create_support_access_request: ID }), userDb: fakeDb({ platform_step_up_check: { ok: true, user_id: ME } }) }), rateLimit: limiter };
     expect((await handle(req("POST", "/support/requests", supportBody), ENDPOINTS, d)).status).toBe(201);
     expect(limiter.calls).toHaveLength(1);
   });

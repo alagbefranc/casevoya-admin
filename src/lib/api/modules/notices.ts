@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ALL_ROLES, OPERATORS, defineEndpoint, must, rpc } from "../core";
 import { ApiError, fromDbError } from "../errors";
-import { isoTime, limit, offset, uuid } from "../schemas";
+import { isoTime, limit, offset, optionalCode, uuid } from "../schemas";
 
 export const NOTICE_KINDS = ["maintenance", "incident", "info"] as const;
 export const NOTICE_SEVERITIES = ["info", "minor", "major"] as const;
@@ -35,6 +35,7 @@ export const postNoticeInput = z
     audience: z.enum(["all", "listed"]),
     organizationIds: z.array(uuid).max(1000, "List at most 1000 firms").default([]),
     publish: z.boolean().default(true),
+    code: optionalCode,
   })
   .superRefine((v, ctx) => {
     if (v.kind === "maintenance" && !v.endsAt) ctx.addIssue({ code: "custom", path: ["endsAt"], message: "Maintenance needs an end time" });
@@ -52,6 +53,7 @@ export const updateNoticeInput = z
     startsAt: isoTime.optional().nullable(),
     endsAt: isoTime.optional().nullable(),
     publish: z.boolean().default(false),
+    code: optionalCode,
   })
   .superRefine((v, ctx) => {
     if (v.startsAt && v.endsAt && Date.parse(v.endsAt) <= Date.parse(v.startsAt)) ctx.addIssue({ code: "custom", path: ["endsAt"], message: "The end time is after the start time" });
@@ -121,9 +123,13 @@ export const noticeEndpoints = [
   defineEndpoint({
     method: "POST",
     path: "/notices",
-    summary: "Post a notice (draft or published) to all firms or listed firms.",
+    summary:
+      "Post a notice (draft or published) to all firms or listed firms. Your own session; publishing needs a fresh step-up, proven to the database with your own session first.",
     roles: OPERATORS,
     input: postNoticeInput,
+    session: (input) => (input.publish ? "step_up" : "required"),
+    serviceStepUp: true,
+    auditRequired: (input) => input.publish,
     status: 201,
     audit: { action: "notices.posted", table: "public.service_notices" },
     async handler({ db, input, audit, admin }) {
@@ -147,9 +153,14 @@ export const noticeEndpoints = [
   defineEndpoint({
     method: "PATCH",
     path: "/notices/:id",
-    summary: "Edit a draft or published notice; publish: true publishes a draft. Resolved notices are frozen.",
+    summary:
+      "Edit a draft or published notice; publish: true publishes a draft. Resolved notices are frozen. Fresh step-up, proven to the database with your own session first.",
     roles: OPERATORS,
     input: updateNoticeInput,
+    // Any edit may change what firms already see (a published notice), so every edit needs the step-up.
+    session: "step_up",
+    serviceStepUp: true,
+    auditRequired: true,
     audit: { action: "notices.updated", table: "public.service_notices" },
     async handler({ db, input, audit, admin }) {
       const current = await loadNotice(db, input.id);
@@ -172,9 +183,12 @@ export const noticeEndpoints = [
   defineEndpoint({
     method: "POST",
     path: "/notices/:id/resolve",
-    summary: "Resolve a notice with a note. Firms see it as resolved.",
+    summary: "Resolve a notice with a note. Firms see it as resolved. Fresh step-up, proven to the database with your own session first.",
     roles: OPERATORS,
-    input: z.object({ id: uuid, resolutionNote: z.string().trim().min(3, "Say how it was resolved (3 to 1000 characters)").max(1000) }),
+    input: z.object({ id: uuid, resolutionNote: z.string().trim().min(3, "Say how it was resolved (3 to 1000 characters)").max(1000), code: optionalCode }),
+    session: "step_up",
+    serviceStepUp: true,
+    auditRequired: true,
     audit: { action: "notices.resolved", table: "public.service_notices" },
     async handler({ db, input, admin }) {
       await rpc(db, "resolve_service_notice", { p_notice_id: input.id, p_resolution_note: input.resolutionNote, p_acting_admin: admin.userId });
