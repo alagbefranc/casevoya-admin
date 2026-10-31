@@ -71,10 +71,12 @@ function joinCaller(db: FakeDb, userId: string | null): JoinContext {
   return { email: NEW, subject: "s", expiresAt: 0, userId, env, db: db as never, role: null, templateReviewer: false, setup: true, join: invite };
 }
 
-function deps(w: World, opts: { denied?: AdminDenied } = {}) {
+function deps(w: World, opts: { denied?: AdminDenied; attempts?: number | Error | "none" } = {}) {
   const db = fakeDb();
-  const d: ApiDeps & { db: FakeDb } = {
-    ...baseDeps({ db }),
+  // Like the route, an attempt store is configured by default ("none" omits it).
+  const base = baseDeps({ db, badAttempts: opts.attempts === "none" ? undefined : (opts.attempts ?? 0) });
+  const d: ApiDeps & { db: FakeDb; attemptCalls: string[] } = {
+    ...base,
     db,
     setup: fakeSetup(w),
     gate: async (mode) => {
@@ -171,6 +173,33 @@ describe("join endpoints", () => {
     const { status, json } = await call(deps(w), "POST", "/join/account", { fullName: "X Y", password: GOOD });
     expect(status).toBe(409);
     expect(json.error?.message).toMatch(/never confirmed/);
+    expect(w.calls).toEqual([]);
+  });
+  it("never offers a password reset after a wrong password, and records the attempt", async () => {
+    for (const factors of [[], [{ id: "f", type: "totp", status: "verified", createdAt: "" }]]) {
+      const w = world({ user: { id: ME, emailConfirmed: true, fullName: null, factors } });
+      const d = deps(w);
+      const { status, json } = await call(d, "POST", "/join/account", { fullName: "Old Hand", password: "wrong password here" });
+      expect(status).toBe(422);
+      expect((json.error as { details?: unknown } | undefined)?.details).toMatchObject({ canReset: false });
+      expect(d.attemptCalls).toEqual(["reserve:password", "resolve:false"]);
+    }
+  });
+  it("reserves an attempt before trying a password or code for an existing account, and fails closed without one", async () => {
+    const w = world({ user: { id: ME, emailConfirmed: true, fullName: null, factors: [] } });
+    const locked = deps(w, { attempts: 5 });
+    expect((await call(locked, "POST", "/join/account", { fullName: "Old Hand", password: GOOD })).status).toBe(429);
+    const broken = deps(w, { attempts: new Error("reserve failed") });
+    expect((await call(broken, "POST", "/join/account", { fullName: "Old Hand", password: GOOD })).status).toBe(502);
+    const none = deps(w, { attempts: "none" });
+    expect((await call(none, "POST", "/join/account", { fullName: "Old Hand", password: GOOD })).status).toBe(502);
+    expect(w.calls).toEqual([]);
+  });
+  it("fails closed when the recent bad attempt count cannot be read", async () => {
+    const w = world();
+    const d = deps(w);
+    d.setup = { ...fakeSetup(w), recentBadAttempts: async () => { throw new Error("count failed"); } };
+    expect((await call(d, "POST", "/join/account", { fullName: "New Worker", password: GOOD })).status).toBe(502);
     expect(w.calls).toEqual([]);
   });
   it("refuses finish without aal2", async () => {

@@ -90,14 +90,14 @@ export function NoticeDrawer({ id, onClose, onEdit }: { id: string; onClose: () 
         </Section>
       </Drawer>
       {resolving && n ? (
-        <ConfirmDialog title={`Resolve “${n.title}”?`} confirmLabel="Resolve" reason={{ label: "Resolution note", min: 3, max: 1000, hint: "Firms will see this note." }} successToast="Notice resolved"
-          onConfirm={({ reason }) => api.post(`/notices/${n.id}/resolve`, { resolutionNote: reason })} onClose={() => setResolving(false)}>
+        <ConfirmDialog title={`Resolve “${n.title}”?`} confirmLabel="Resolve" reason={{ label: "Resolution note", min: 3, max: 1000, hint: "Firms will see this note." }} successToast="Notice resolved" stepUp
+          onConfirm={({ reason, code }) => api.post(`/notices/${n.id}/resolve`, { resolutionNote: reason, code })} onClose={() => setResolving(false)}>
           <p style={{ margin: 0 }}>The notice becomes read-only. Firms see it as resolved with your note.</p>
         </ConfirmDialog>
       ) : null}
       {publishing && n ? (
-        <ConfirmDialog title={n.audience === "all" ? "Publish to all firms?" : `Publish to ${audienceText(n).toLowerCase()}?`} confirmLabel="Publish" successToast="Notice published"
-          onConfirm={() => api.patch(`/notices/${n.id}`, { publish: true })} onClose={() => setPublishing(false)}>
+        <ConfirmDialog title={n.audience === "all" ? "Publish to all firms?" : `Publish to ${audienceText(n).toLowerCase()}?`} confirmLabel="Publish" successToast="Notice published" stepUp
+          onConfirm={({ code }) => api.patch(`/notices/${n.id}`, { publish: true, code })} onClose={() => setPublishing(false)}>
           <p style={{ margin: 0 }}>Staff of the targeted firms will see this notice in Casevoya from {when(n.starts_at ?? new Date().toISOString())}.</p>
         </ConfirmDialog>
       ) : null}
@@ -149,8 +149,9 @@ export function NoticeForm({ editing, prefillFirm, onClose }: { editing: Notice 
     }
     return { kind, severity, title: title.trim(), body: body.trim(), startsAt: startIso, endsAt: endIso, audience, organizationIds: audience === "listed" ? firms.map((f) => f.id) : [], publish };
   };
-  const send = async (publish: boolean) => {
-    const out = editing ? await api.patch(`/notices/${editing.id}`, payload(publish)) : await api.post("/notices", payload(publish));
+  const send = async (publish: boolean, code?: string) => {
+    const body = { ...payload(publish), ...(code ? { code } : {}) };
+    const out = editing ? await api.patch(`/notices/${editing.id}`, body) : await api.post("/notices", body);
     refreshAll();
     toast(editing ? (publish && editing.status === "draft" ? "Notice published" : "Notice updated") : publish ? "Notice published" : "Draft saved");
     onClose();
@@ -217,8 +218,8 @@ export function NoticeForm({ editing, prefillFirm, onClose }: { editing: Notice 
         </form>
       </Drawer>
       {confirmPublish ? (
-        <ConfirmDialog title={`Publish to ${audienceLabel}?`} confirmLabel="Publish"
-          onConfirm={() => send(true)} onClose={() => setConfirmPublish(false)}>
+        <ConfirmDialog title={`Publish to ${audienceLabel}?`} confirmLabel="Publish" stepUp
+          onConfirm={({ code }) => send(true, code)} onClose={() => setConfirmPublish(false)}>
           <p style={{ margin: 0 }}>Every targeted firm&apos;s staff will see this notice in Casevoya from {startIso ? when(startIso) : "now"}.</p>
         </ConfirmDialog>
       ) : null}

@@ -82,7 +82,8 @@ export default function GrantDetailPage() {
           danger={g.state === "active"}
           reason={{ min: 3, max: 500 }}
           successToast={g.state === "active" ? "Access ended" : "Request withdrawn"}
-          onConfirm={({ reason }) => api.post(`/support/requests/${g.id}/cancel`, { reason })}
+          stepUp
+          onConfirm={({ reason, code }) => api.post(`/support/requests/${g.id}/cancel`, { reason, code })}
           onClose={() => setCancel(false)}
         >
           <p style={{ margin: 0 }}>{g.state === "active" ? "Access stops immediately. The firm's owners see that you ended it." : "The firm's owners will no longer be asked to approve it."}</p>

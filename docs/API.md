@@ -34,7 +34,14 @@ page, with request/response shapes, rules and workflows, is **docs/FRONTEND-SPEC
    `platform_admin_resolve_attempt`; after 5 failed or unresolved attempts in 15 minutes it answers
    `429 rate_limited` (`details.retryAfterSeconds`, also sent as `Retry-After`), and `502` when no
    reservation can be made. Only a password or code Supabase Auth rejected counts as failed; Auth being
-   rate limited, erroring or unreachable answers `502` and does not count.
+   rate limited, erroring or unreachable answers `502` and does not count. First-admin Setup requests that
+   carry a password or code reserve the same way (keyed on the Access user's auth user id) once that user
+   exists; before then the audit-count check applies, and both fail closed. `POST /setup/password` answers
+   `409` for a confirmed account that already has a verified authenticator.
+   Publishing notices (`POST /notices` with `publish: true`, `PATCH /notices/:id`,
+   `POST /notices/:id/resolve`) and creating or cancelling support requests need a fresh step-up proven to
+   the database (`platform_step_up_check`) and a "started" audit row first; saving a notice draft needs
+   the own session only.
 8. Handler, then an audit entry (`platform_admin_record_audit`, action `admin_portal.<area>.<verb>`) for
    every mutation, including denied and failed attempts.
 

@@ -25,7 +25,7 @@ export function Countdown({ grant }: { grant: GrantRow }) {
   return <span className="countdown">{left} min left</span>;
 }
 
-const FIELDS = ["organizationId", "scope", "matterId", "requestedByName", "requestedByEmail", "ticketRef", "notIncluded", "reason", "minutes", "confirmFirmNotified"];
+const FIELDS = ["organizationId", "scope", "matterId", "requesterName", "requesterEmail", "ticketRef", "notIncluded", "reason", "minutes", "confirmFirmNotified"];
 
 /** Request access form (spec 2.12). Opens prefilled from `/grants?request=<orgId>`. */
 export function RequestAccessDrawer({ firmId, onClose }: { firmId: string | null; onClose: () => void }) {
@@ -64,8 +64,8 @@ export function RequestAccessDrawer({ firmId, onClose }: { firmId: string | null
         organizationId: firm[0]?.id,
         scope,
         matterId: matterScope ? matterId.trim() : null,
-        requestedByName: name.trim(),
-        requestedByEmail: email.trim() || null,
+        requesterName: name.trim(),
+        requesterEmail: email.trim() || null,
         ticketRef: ticket.trim() || null,
         notIncluded: notIncluded.trim() || null,
         reason: reason.trim(),
@@ -90,7 +90,7 @@ export function RequestAccessDrawer({ firmId, onClose }: { firmId: string | null
       </>
     }>
       <form id="grant-form" className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-        <ErrorSummary issues={issues} ids={{ organizationId: "g-firm", matterId: "g-matter", requestedByName: "g-name", requestedByEmail: "g-email", ticketRef: "g-ticket", minutes: "g-min", notIncluded: "g-not", reason: "g-reason" }} />
+        <ErrorSummary issues={issues} ids={{ organizationId: "g-firm", matterId: "g-matter", requesterName: "g-name", requesterEmail: "g-email", ticketRef: "g-ticket", minutes: "g-min", notIncluded: "g-not", reason: "g-reason" }} />
         <p className="muted" style={{ margin: 0 }}>The firm&apos;s owners decide. Nothing opens until one of them approves.</p>
         <FirmPicker id="g-firm" label="Firm" value={firm} onChange={setFirm} error={err("organizationId")} />
         <fieldset className="fld" style={{ border: 0, padding: 0, margin: 0 }}>
@@ -106,10 +106,10 @@ export function RequestAccessDrawer({ firmId, onClose }: { firmId: string | null
           <input id="g-matter" className="inp" value={matterId} disabled={!matterScope} onChange={(e) => setMatterId(e.target.value)} />
         </Field>
         <div className="row2">
-          <Field id="g-name" label="Requester name" error={err("requestedByName")}>
+          <Field id="g-name" label="Requester name" error={err("requesterName")}>
             <input id="g-name" className="inp" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
           </Field>
-          <Field id="g-email" label="Requester email (optional)" error={err("requestedByEmail")}>
+          <Field id="g-email" label="Requester email (optional)" error={err("requesterEmail")}>
             <input id="g-email" className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
         </div>

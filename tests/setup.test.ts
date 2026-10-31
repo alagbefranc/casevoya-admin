@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { handle, type ApiDeps } from "@/lib/api/core";
 import { ENDPOINTS } from "@/lib/api/registry";
-import { SETUP_ALREADY_DONE_MESSAGE, SETUP_MAX_BAD_ATTEMPTS, SETUP_NOTE, type SetupApi, type SetupFactor, type SetupUser } from "@/lib/api/modules/setup";
+import { SETUP_ALREADY_DONE_MESSAGE, SETUP_MAX_BAD_ATTEMPTS, SETUP_NOTE, SETUP_RESET_REFUSED_MESSAGE, type SetupApi, type SetupFactor, type SetupUser } from "@/lib/api/modules/setup";
 import { AdminDenied, evaluateSetupGate, type SetupContext } from "@/lib/guard";
 import { SessionError, type SessionStatus } from "@/lib/session";
 import { ID, ME, NOW, auditCalls, deps as baseDeps, env, fakeDb, req, sessionState, type FakeDb } from "./api-helpers";
@@ -90,11 +90,12 @@ function setupCaller(db: FakeDb, userId: string | null): SetupContext {
   return { email: "admin@casevoya.ca", subject: "s", expiresAt: 0, userId, env, db: db as never, role: null, templateReviewer: false, setup: true };
 }
 
-function deps(w: World, opts: { locked?: boolean; denied?: AdminDenied; rpcs?: Record<string, unknown> } = {}) {
+function deps(w: World, opts: { locked?: boolean; denied?: AdminDenied; rpcs?: Record<string, unknown>; attempts?: number | Error | "none" } = {}) {
   const db = fakeDb({ bootstrap_first_platform_admin: ME, ...(opts.rpcs ?? {}) });
-  const base = baseDeps({ db });
+  // The atomic attempt store (failed attempts already recorded for the user, an error it throws, or "none" for no store).
+  const base = baseDeps({ db, badAttempts: opts.attempts === "none" ? undefined : (opts.attempts ?? 0) });
   const logs: { message: string; extra?: Record<string, unknown> }[] = [];
-  const d: ApiDeps & { db: FakeDb; logs: typeof logs } = {
+  const d: ApiDeps & { db: FakeDb; logs: typeof logs; attemptCalls: string[] } = {
     ...base,
     db,
     logs,
@@ -297,12 +298,33 @@ describe("POST /setup/password", () => {
     expect(w.calls).toEqual([`getUser:${ME}`, `updateUser:${ME}:fullName,password`, "signIn"]);
     expect(auditCalls(d.db)[0].args).toMatchObject({ p_action: "admin_portal.setup.password_reset", p_result: "success" });
   });
-  it("keeps the factors of a confirmed account", async () => {
-    const w = world({ user: { id: ME, emailConfirmed: true, fullName: null, factors: [verified, pending] } });
+  it("keeps the unverified factors of a confirmed account", async () => {
+    const w = world({ user: { id: ME, emailConfirmed: true, fullName: null, factors: [pending] } });
     const { status } = await call(deps(w), "POST", "/setup/password", { fullName: "Francis", password: "a brand new password", confirm: true });
     expect(status).toBe(200);
     expect(w.calls.some((c) => c.startsWith("delete"))).toBe(false);
+    expect(w.user?.factors).toEqual([pending]);
+  });
+  it("refuses a confirmed account with a verified authenticator and changes nothing", async () => {
+    const w = world({ user: { id: ME, emailConfirmed: true, fullName: null, factors: [verified, pending] } });
+    const d = deps(w);
+    const { status, json } = await call(d, "POST", "/setup/password", { fullName: "Francis", password: "a brand new password", confirm: true });
+    expect(status).toBe(409);
+    expect(json.error?.code).toBe("conflict");
+    expect(json.error?.message).toBe(SETUP_RESET_REFUSED_MESSAGE);
+    expect(json.error?.details).toMatchObject({ canReset: false, verifiedFactor: true });
+    expect(w.calls).toEqual([`getUser:${ME}`]);
+    expect(w.password).toBe(GOOD);
+    expect(w.session).toBeNull();
     expect(w.user?.factors).toEqual([verified, pending]);
+    expect(auditCalls(d.db)[0].args).toMatchObject({ p_action: "admin_portal.setup.password_reset", p_result: "failure" });
+    expect(JSON.stringify(auditCalls(d.db))).not.toContain("a brand new password");
+  });
+  it("does not offer the reset path after a wrong password on an account with a verified authenticator", async () => {
+    const w = world({ user: { id: ME, emailConfirmed: true, fullName: null, factors: [verified] } });
+    const { status, json } = await call(deps(w), "POST", "/setup/account", { fullName: "Francis", password: "wrong password!!" });
+    expect(status).toBe(422);
+    expect(json.error?.details).toMatchObject({ canReset: false });
   });
   it("on an unconfirmed account removes all factors, then confirms the email and sets the password", async () => {
     const w = world({ user: { id: ME, emailConfirmed: false, fullName: null, factors: [verified, pending] } });
@@ -467,6 +489,87 @@ describe("POST /setup/finish", () => {
     const { status } = await call(d, "POST", "/setup/finish", {});
     expect(status).toBe(422);
     expect(d.db.calls.some((c) => c.fn === "bootstrap_first_platform_admin")).toBe(false);
+  });
+});
+
+describe("setup attempt reservations (atomic, per auth user)", () => {
+  const confirmed = (factors: SetupFactor[] = []): SetupUser => ({ id: ME, emailConfirmed: true, fullName: null, factors });
+
+  it("reserves a password attempt before checking the password, and records the outcome", async () => {
+    const bad = deps(world({ user: confirmed() }));
+    expect((await call(bad, "POST", "/setup/account", { fullName: "Francis", password: "wrong password!!" })).status).toBe(422);
+    expect(bad.attemptCalls).toEqual(["reserve:password", "resolve:false"]);
+
+    const good = deps(world({ user: confirmed() }));
+    expect((await call(good, "POST", "/setup/account", { fullName: "Francis", password: GOOD })).status).toBe(200);
+    expect(good.attemptCalls).toEqual(["reserve:password", "resolve:true"]);
+  });
+
+  it("reserves a code attempt before verifying the code, and records the outcome", async () => {
+    const bad = deps(world({ user: confirmed([pending]), session: aal1 }));
+    expect((await call(bad, "POST", "/setup/authenticator/verify", { code: "000000" })).status).toBe(422);
+    expect(bad.attemptCalls).toEqual(["reserve:mfa", "resolve:false"]);
+
+    const good = deps(world({ user: confirmed([pending]), session: aal1 }));
+    expect((await call(good, "POST", "/setup/authenticator/verify", { code: "123456" })).status).toBe(200);
+    expect(good.attemptCalls).toEqual(["reserve:mfa", "resolve:true"]);
+  });
+
+  it("refuses once the store reports the user locked out, without trying the password or code", async () => {
+    const pw = world({ user: confirmed() });
+    const res = await call(deps(pw, { attempts: 5 }), "POST", "/setup/account", { fullName: "Francis", password: GOOD });
+    expect(res.status).toBe(429);
+    expect(res.json.error?.code).toBe("rate_limited");
+    expect(pw.calls).not.toContain("signIn");
+
+    const totp = world({ user: confirmed([verified]), session: aal1 });
+    const res2 = await call(deps(totp, { attempts: 5 }), "POST", "/setup/authenticator/verify", { code: "123456" });
+    expect(res2.status).toBe(429);
+    expect(totp.calls.some((c) => c.startsWith("verify"))).toBe(false);
+  });
+
+  it("fails closed when the reservation cannot be written", async () => {
+    const pw = world({ user: confirmed() });
+    const res = await call(deps(pw, { attempts: new Error("reserve failed") }), "POST", "/setup/account", { fullName: "Francis", password: GOOD });
+    expect(res.status).toBe(502);
+    expect(res.json.error?.code).toBe("upstream_error");
+    expect(pw.calls).not.toContain("signIn");
+
+    const totp = world({ user: confirmed([verified]), session: aal1 });
+    const res2 = await call(deps(totp, { attempts: new Error("reserve failed") }), "POST", "/setup/authenticator/verify", { code: "123456" });
+    expect(res2.status).toBe(502);
+    expect(totp.calls.some((c) => c.startsWith("verify"))).toBe(false);
+  });
+
+  it("fails closed when no attempt store is configured once the user exists", async () => {
+    const pw = world({ user: confirmed() });
+    const res = await call(deps(pw, { attempts: "none" }), "POST", "/setup/account", { fullName: "Francis", password: GOOD });
+    expect(res.status).toBe(502);
+    expect(pw.calls).not.toContain("signIn");
+  });
+
+  it("lets at most the limit of parallel wrong codes reach Supabase", async () => {
+    const w = world({ user: confirmed([verified]), session: aal1 });
+    const d = deps(w);
+    const results = await Promise.all(Array.from({ length: 12 }, () => call(d, "POST", "/setup/authenticator/verify", { code: "000000" })));
+    const tried = w.calls.filter((c) => c.startsWith("verify")).length;
+    expect(tried).toBeLessThanOrEqual(SETUP_MAX_BAD_ATTEMPTS);
+    expect(results.filter((r) => r.status === 429).length).toBe(12 - tried);
+  });
+
+  it("before the auth user exists: no reservation, and the audit count fails closed", async () => {
+    const ok = world();
+    const okDeps = deps(ok);
+    expect((await call(okDeps, "POST", "/setup/account", { fullName: "Francis", password: GOOD })).status).toBe(200);
+    expect(okDeps.attemptCalls).toEqual([]);
+
+    const w = world();
+    const d = deps(w);
+    d.setup = { ...fakeSetup(w), recentBadAttempts: async () => { throw new Error("count failed"); } };
+    const res = await call(d, "POST", "/setup/account", { fullName: "Francis", password: GOOD });
+    expect(res.status).toBe(502);
+    expect(res.json.error?.code).toBe("upstream_error");
+    expect(w.calls).not.toContain(`createUser:Francis`);
   });
 });
 

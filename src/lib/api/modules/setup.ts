@@ -16,9 +16,14 @@ import { code, empty } from "../schemas";
 
 export const SETUP_PASSWORD_MIN = 12;
 export const SETUP_NOTE = "first admin via admin portal Setup";
-/** Bad passwords plus bad codes allowed per Access email in the window, counted from the audit log. */
+/**
+ * Bad passwords plus bad codes allowed per Access email in the window, counted from the audit log. Once the auth
+ * user exists, password and code requests are also reserved atomically per user id first (core.ts step 5a).
+ */
 export const SETUP_MAX_BAD_ATTEMPTS = 5;
 export const SETUP_LOCKOUT_MINUTES = 15;
+export const SETUP_RESET_REFUSED_MESSAGE =
+  "This account already has a verified authenticator, so Setup cannot replace its password. Continue with your current password, or reset it with Casevoya's password reset email first.";
 export const SETUP_ALREADY_DONE_MESSAGE = "The database refused to make you the first admin: a platform admin already exists. Reload the page.";
 
 export type SetupFactor = { id: string; type: string; status: string; createdAt: string };
@@ -77,11 +82,22 @@ export function target(caller: SetupContext, userId: string): SetupTarget {
   return { env: caller.env, email: caller.email, userId };
 }
 
-/** Refuses while too many bad passwords or codes were recorded for this email in the lockout window. */
+/**
+ * Refuses while too many bad passwords or codes were recorded for this email in the lockout window. Fails closed:
+ * when the count cannot be read the request is refused.
+ */
 export async function checkLockout(ctx: HandlerCtx<unknown>, caller: SetupContext): Promise<void> {
   const now = (ctx.deps.nowSeconds?.() ?? Math.floor(Date.now() / 1000)) * 1000;
   const since = new Date(now - SETUP_LOCKOUT_MINUTES * 60_000).toISOString();
-  const bad = await api(ctx).recentBadAttempts(caller, since);
+  const setup = api(ctx);
+  let bad: number;
+  try {
+    bad = await setup.recentBadAttempts(caller, since);
+  } catch (error) {
+    ctx.log("admin setup attempt count failed", { requestId: ctx.requestId, error: redact(error instanceof Error ? error.message : String(error)) });
+    throw new ApiError("upstream_error", "Could not check recent setup attempts, so nothing was tried. Try again.");
+  }
+  if (!Number.isFinite(bad) || bad < 0) throw new ApiError("upstream_error", "Could not check recent setup attempts, so nothing was tried. Try again.");
   if (bad >= SETUP_MAX_BAD_ATTEMPTS) {
     ctx.log("admin setup locked out after bad attempts", { requestId: ctx.requestId, attempts: bad });
     throw new ApiError("rate_limited", `Too many wrong passwords or codes. Wait ${SETUP_LOCKOUT_MINUTES} minutes, then try again.`, {
@@ -156,9 +172,10 @@ export function accountSteps(flow: "setup" | "join") {
             if (!isKind(error, "bad_credentials")) throw error;
             markBad(ctx, caller, "password");
             ctx.log("admin setup password not accepted", { requestId: ctx.requestId, userId: user.id });
+            // Only Setup offers a new password, and never for an account that already has a verified authenticator.
             throw new ApiError("validation_failed", "That password was not accepted for this account", {
               issues: [{ path: "password", message: "That password was not accepted for this account" }],
-              canReset: flow === "setup",
+              canReset: flow === "setup" && verifiedTotp(user).length === 0,
             });
           }
           await setup.updateUser(caller, user.id, { fullName: ctx.input.fullName });
@@ -270,7 +287,8 @@ export const setupEndpoints = [
   defineEndpoint({
     method: "POST",
     path: "/setup/password",
-    summary: "Setup step 1, other path: set a new password on the existing account (only while platform_admins is empty), then sign in.",
+    summary:
+      "Setup step 1, other path: set a new password on the existing account (only while platform_admins is empty), then sign in. Refused (409) for a confirmed account with a verified authenticator.",
     roles: [],
     gate: "setup",
     input: z.object({ fullName, password, confirm: z.literal(true, { message: "Confirm you want to set a new password" }) }),
@@ -285,6 +303,13 @@ export const setupEndpoints = [
       const setup = api(ctx);
       const user = caller.userId ? await setup.getUser(caller, caller.userId) : null;
       if (!user) throw new ApiError("conflict", "There is no account for this email yet. Create it instead.");
+      // A confirmed account with a verified authenticator keeps its password: Setup has no way to check that
+      // authenticator without the current password, so it refuses rather than bypass it.
+      if (user.emailConfirmed && verifiedTotp(user).length) {
+        ctx.audit.context = { setup_email: caller.email, refused: "verified_factor" };
+        ctx.log("admin setup password reset refused: account has a verified authenticator", { requestId: ctx.requestId, userId: user.id });
+        throw new ApiError("conflict", SETUP_RESET_REFUSED_MESSAGE, { canReset: false, verifiedFactor: true });
+      }
       // An unconfirmed account may have been registered by someone else: remove every factor on it before
       // confirming the email and setting the new password.
       let removedFactors = 0;

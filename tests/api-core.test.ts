@@ -138,18 +138,18 @@ describe("reviewer flag", () => {
 
 describe("audit write", () => {
   it("still returns success when the audit write fails after the action", async () => {
-    const d = deps({ db: fakeDb({ post_service_notice: ID, platform_admin_record_audit: { error: { code: "XX000", message: "down" } } }, { service_notices: [{ id: ID, status: "draft", starts_at: null, ends_at: null, audience: "all" }] }) });
+    const d = deps({ session: "fresh", db: fakeDb({ post_service_notice: ID, platform_admin_record_audit: { error: { code: "XX000", message: "down" } } }, { service_notices: [{ id: ID, status: "draft", starts_at: null, ends_at: null, audience: "all" }] }) });
     const res = await handle(req("POST", "/notices", { kind: "info", title: "Heads up", body: "New feature", audience: "all", publish: false }), ENDPOINTS, d);
     expect(res.status).toBe(201);
   });
   it("names the actor, object, firm and request in the entry", async () => {
-    const d = deps({ db: fakeDb({ create_support_access_request: ID }) });
+    const d = deps({ session: "fresh", db: fakeDb({ create_support_access_request: ID }), userDb: fakeDb({ platform_step_up_check: { ok: true, user_id: ME } }) });
     await handle(
       req("POST", "/support/requests", { organizationId: ORG, scope: "firm_settings", requesterName: "Ops", reason: "Billing settings help", confirmFirmNotified: true }),
       ENDPOINTS,
       d,
     );
-    expect(auditCalls(d.db)[0].args).toMatchObject({
+    expect(outcomeAudits(d.db)[0].args).toMatchObject({
       p_actor: ME,
       p_action: "admin_portal.support.request_created",
       p_object_table: "public.support_access_requests",
@@ -175,14 +175,14 @@ describe("module rules", () => {
     expect(() => readCiccCsv('Licence Number,Name,Status\n"R1,A,Active\n')).toThrow(/quoted/);
   });
   it("sends a listed-firm notice with its firms and an all-firm notice with none", async () => {
-    const d = deps({ db: fakeDb({ post_service_notice: ID }, { service_notices: [{ id: ID, status: "published", audience: "listed", starts_at: null, ends_at: null }] }) });
+    const d = deps({ session: "fresh", db: fakeDb({ post_service_notice: ID }, { service_notices: [{ id: ID, status: "published", audience: "listed", starts_at: null, ends_at: null }] }), userDb: fakeDb({ platform_step_up_check: { ok: true, user_id: ME } }) });
     await handle(req("POST", "/notices", { kind: "incident", title: "Slow", body: "x", audience: "listed", organizationIds: [ORG] }), ENDPOINTS, d);
     expect(d.db.calls.find((c) => c.fn === "post_service_notice")?.args).toMatchObject({ p_organization_ids: [ORG], p_acting_admin: ME, p_publish: true });
     const bad = await handle(req("POST", "/notices", { kind: "incident", title: "Slow", body: "x", audience: "listed" }), ENDPOINTS, deps({}));
     expect(bad.status).toBe(422);
   });
   it("freezes resolved notices", async () => {
-    const d = deps({ db: fakeDb({}, { service_notices: [{ id: ID, status: "resolved", audience: "all" }] }) });
+    const d = deps({ session: "fresh", db: fakeDb({}, { service_notices: [{ id: ID, status: "resolved", audience: "all" }] }), userDb: fakeDb({ platform_step_up_check: { ok: true, user_id: ME } }) });
     const res = await handle(req("PATCH", `/notices/${ID}`, { title: "New title" }), ENDPOINTS, d);
     expect(res.status).toBe(409);
   });

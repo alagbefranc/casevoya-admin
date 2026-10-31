@@ -33,16 +33,18 @@ export type SessionApi = {
 
 export type AttemptKind = "password" | "mfa";
 export type AttemptReservation = { allowed: boolean; attemptId: string | null; retryAfterSeconds: number };
+/** Whose attempts are counted: the auth user id, and the service-role client that records them. */
+export type AttemptSubject = { db: SupabaseClient; userId: string };
 
 /**
- * Atomic per-admin reservation of authenticator code / sign-in password attempts (src/lib/lockout.ts). Injected so
- * tests need no database. The gate decision comes from `reserve`; unresolved reservations count as failures.
+ * Atomic per-user reservation of authenticator code / password attempts (src/lib/lockout.ts). Injected so tests
+ * need no database. The gate decision comes from `reserve`; unresolved reservations count as failures.
  */
 export type AttemptStore = {
-  /** Reserves one attempt, or refuses when the admin is locked out. Throws when it cannot decide (the request is then refused). */
-  reserve(caller: SessionCaller, kind: AttemptKind): Promise<AttemptReservation>;
+  /** Reserves one attempt, or refuses when the user is locked out. Throws when it cannot decide (the request is then refused). */
+  reserve(subject: AttemptSubject, kind: AttemptKind): Promise<AttemptReservation>;
   /** Records the outcome of a reserved attempt. */
-  resolve(caller: SessionCaller, attemptId: string, succeeded: boolean): Promise<void>;
+  resolve(subject: AttemptSubject, attemptId: string, succeeded: boolean): Promise<void>;
 };
 
 /** Wrong codes or passwords allowed per admin in the window before code-bearing requests are refused (enforced by the database). */
@@ -55,7 +57,10 @@ export type ApiDeps = {
   /** Extra per-caller limits for sensitive endpoints (src/lib/rate-limit.ts). When absent none are applied (tests). */
   rateLimit?: Limiter;
   sessions: SessionApi;
-  /** Attempt lockout for authenticator codes and sign-in passwords. When absent no lockout is applied (tests only; the route always sets it). */
+  /**
+   * Attempt lockout for authenticator codes and passwords. When absent no lockout is applied to admin endpoints
+   * (tests only; the route always sets it); Setup requests that need a reservation are then refused.
+   */
   attempts?: AttemptStore;
   /** First-admin Setup operations (src/lib/setup.ts). Only the setup endpoints use it. */
   setup?: SetupApi;
@@ -361,9 +366,10 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
   };
   // Attempt reservation (step 5a): the outcome is taken from the session calls that carry the code or password.
   let attemptId: string | null = null;
+  let attemptSubject: AttemptSubject | null = null;
   let codeRejected = false;
   const settleAttempt = async () => {
-    if (!attemptId || !deps.attempts) return;
+    if (!attemptId || !attemptSubject || !deps.attempts) return;
     const id = attemptId;
     attemptId = null;
     // Only a code or password that Supabase rejected counts as a bad attempt; a request that failed for
@@ -371,7 +377,7 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
     // A success never offsets failures (the database counts unsuccessful attempts only).
     const succeeded = !codeRejected;
     try {
-      await deps.attempts.resolve(caller as SessionCaller, id, succeeded);
+      await deps.attempts.resolve(attemptSubject, id, succeeded);
     } catch (error) {
       // The reservation stays pending and keeps counting as a failure.
       log("admin api attempt resolution failed", { requestId, endpoint: endpointName, error: redact(error instanceof Error ? error.message : String(error)) });
@@ -461,15 +467,30 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
     }
 
     // 5a. Attempt lockout: every request carrying an authenticator code (sign-in also carries the password) reserves
-    // an attempt for this admin in the database first; the database refuses once too many recent attempts failed
-    // (Setup has its own lockout). Fails closed when no reservation can be made.
-    if (code && !("setup" in caller) && deps.attempts) {
+    // an attempt for this admin in the database first; the database refuses once too many recent attempts failed.
+    // First-admin Setup reserves the same way, keyed on the Access user's auth user id, for every request carrying a
+    // password or code once that user exists (before then the setup handlers check their audit count). Fails closed
+    // when no reservation can be made.
+    const hasPassword = typeof input?.password === "string";
+    let attemptKind: AttemptKind | null = null;
+    if ("setup" in caller) {
+      if (caller.userId && (code || hasPassword)) {
+        attemptKind = code ? "mfa" : "password";
+        attemptSubject = { db: caller.db, userId: caller.userId };
+      }
+    } else if (code && deps.attempts) {
+      attemptKind = hasPassword ? "password" : "mfa";
+      attemptSubject = caller;
+    }
+    if (attemptKind && attemptSubject) {
       let reservation: AttemptReservation;
       try {
-        reservation = await deps.attempts.reserve(caller, typeof input?.password === "string" ? "password" : "mfa");
+        if (!deps.attempts) throw new Error("no attempt store configured");
+        reservation = await deps.attempts.reserve(attemptSubject, attemptKind);
       } catch (error) {
         log("admin api attempt reservation failed", { requestId, endpoint: endpointName, error: redact(error instanceof Error ? error.message : String(error)) });
-        return fail(new ApiError("upstream_error", "Could not check recent code attempts, so the code was not tried. Try again."));
+        const what = "setup" in caller && attemptKind === "password" ? "password" : "code";
+        return fail(new ApiError("upstream_error", `Could not check recent ${what} attempts, so the ${what} was not tried. Try again.`));
       }
       if (!reservation.allowed) {
         const minutes = Math.max(1, Math.ceil(reservation.retryAfterSeconds / 60));
@@ -507,6 +528,12 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
       signIn: (c, password, k) => track(deps.sessions.signIn(c, password, k)),
       stepUp: (c, k) => track(deps.sessions.stepUp(c, k)),
     };
+    const baseSetup = deps.setup;
+    const setup: SetupApi | undefined = baseSetup && {
+      ...baseSetup,
+      signIn: (t, password) => track(baseSetup.signIn(t, password)),
+      verify: (t, factorId, k) => track(baseSetup.verify(t, factorId, k)),
+    };
     let own: Promise<SupabaseClient> | null = null;
     const userClient = (): Promise<SupabaseClient> => {
       if ("setup" in caller) return Promise.reject(new ApiError("internal", "Setup endpoints have no admin session client"));
@@ -524,7 +551,7 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
       db: caller.db,
       input: parsed.data,
       requestId,
-      deps: { ...deps, sessions },
+      deps: { ...deps, sessions, setup },
       audit,
       log,
       userClient,
