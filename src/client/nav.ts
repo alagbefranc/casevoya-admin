@@ -12,6 +12,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     { key: "usage", href: "/usage", label: "Usage", icon: ChartColumn },
     { key: "verification", href: "/verification", label: "Verification", icon: BadgeCheck },
     { key: "grants", href: "/grants", label: "Grants", icon: KeyRound },
+    { key: "resets", href: "/resets", label: "Two-step resets", icon: ShieldCheck },
   ] },
   { group: "Platform", items: [
     { key: "health", href: "/health", label: "Health", icon: Activity },
