@@ -55,6 +55,6 @@ export function callerKey(identity: { subject?: string | null; email: string }):
 export function gateLimits(method: string, path: string, identity: { subject?: string | null; email: string }): [RateLimitName, string][] {
   const verb = method.toUpperCase();
   const limits: [RateLimitName, string][] = [[verb === "GET" || verb === "HEAD" ? "ADMIN_API_READ" : "ADMIN_API_WRITE", callerKey(identity)]];
-  if (path === "/setup" || path.startsWith("/setup/")) limits.push(["ADMIN_SETUP", identity.email]);
+  if (path === "/setup" || path.startsWith("/setup/") || path === "/join" || path.startsWith("/join/")) limits.push(["ADMIN_SETUP", identity.email]);
   return limits;
 }

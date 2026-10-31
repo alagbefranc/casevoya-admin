@@ -33,7 +33,17 @@ export class AccessDenied extends Error {
 
 export async function verifyAccessJwt(
   token: string | null | undefined,
-  opts: { teamDomain: string; aud: string; allowedEmails: string[]; jwks?: JWTVerifyGetKey },
+  opts: {
+    teamDomain: string;
+    aud: string;
+    allowedEmails: string[];
+    jwks?: JWTVerifyGetKey;
+    /**
+     * For an email not on the static list: whether the portal itself admits it (a platform admin or an open
+     * invite, see guard.ts). Access only lets such an email through because the portal added it to the policy.
+     */
+    isAllowed?: (email: string) => Promise<boolean>;
+  },
 ): Promise<AccessIdentity> {
   if (!token) throw new AccessDenied("no_access_jwt", "No Cloudflare Access token on the request");
   let payload;
@@ -48,7 +58,7 @@ export async function verifyAccessJwt(
     throw new AccessDenied("bad_access_jwt", "The Cloudflare Access token did not verify");
   }
   const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
-  if (!email || !opts.allowedEmails.includes(email)) {
+  if (!email || !(opts.allowedEmails.includes(email) || (opts.isAllowed ? await opts.isAllowed(email) : false))) {
     throw new AccessDenied("email_not_allowed", "This identity is not on the admin allow list");
   }
   return { email, subject: String(payload.sub ?? ""), expiresAt: Number(payload.exp ?? 0) };

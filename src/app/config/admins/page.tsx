@@ -9,7 +9,7 @@ import { refreshAll, useApi, useQueryState } from "@/client/hooks";
 import { dash, day, when } from "@/client/format";
 import { splitIssues, stepUpNeed } from "@/client/session-rules";
 import type { Role } from "@/client/types";
-import { ErrorSummary, Alert, Badge, CodeInput, DataTable, DeniedState, Drawer, Empty, ErrorAlert, Field, NotBuilt, PageHeader, Panel, Section, SkeletonRows, Status, TextArea } from "@/components/ui";
+import { ErrorSummary, Alert, Badge, CodeInput, DataTable, DeniedState, Drawer, Empty, ErrorAlert, Field, PageHeader, Panel, Section, SkeletonRows, Status, TextArea } from "@/components/ui";
 
 type AdminRow = { user_id: string; email: string; role: Role; template_reviewer: boolean; note: string | null; created_at: string; created_by_email: string | null; last_sign_in_at: string | null; verified_factors: number; licensed: boolean };
 type InviteRow = { id: string; email: string; role: Role; template_reviewer: boolean; note: string | null; status: string; invited_by_email: string | null; invited_at: string; expires_at: string; accepted_at: string | null; cancelled_at: string | null };
@@ -96,7 +96,7 @@ export default function AdminsPage() {
                   { key: "why", label: "Reason", render: (r) => r.reason ?? dash },
                 ]} />
               </Panel>
-              <p className="foot">Inviting sends no email <NotBuilt />. Removing an admin does not remove them from Cloudflare Access; do that in Cloudflare.</p>
+              <p className="foot">Inviting emails the person a link and adds their email to Cloudflare Access. Cancelling an invite or removing an admin takes them off Cloudflare Access again.</p>
             </>
           )}
         </Section>
@@ -111,22 +111,40 @@ export default function AdminsPage() {
       {pending?.kind === "remove" ? (
         <ConfirmDialog title={`Remove ${pending.admin.email}?`} confirmLabel="Remove admin" danger stepUp
           reason={{ min: 3, max: 500 }} typed={{ label: <>Type <b>{pending.admin.email}</b> to confirm</>, value: pending.admin.email }}
-          onConfirm={async ({ reason, typed, code }) => { await api.post(`/admins/${pending.admin.user_id}/remove`, { reason, confirmEmail: typed, code }); await reloadMe(); }}
+          onConfirm={async ({ reason, typed, code }) => { const out = await api.post<SyncOut>(`/admins/${pending.admin.user_id}/remove`, { reason, confirmEmail: typed, code }); await reloadMe(); accessWarning(out, "Admin removed"); }}
           onClose={() => setPending(null)} successToast="Admin removed">
-          <Alert tone="warn">They lose portal access at once. A removal record is kept. Remove them from the Cloudflare Access policy too.</Alert>
+          <Alert tone="warn">They lose portal access at once and are taken off Cloudflare Access. A removal record is kept.</Alert>
         </ConfirmDialog>
       ) : null}
       {pending?.kind === "cancel" ? (
         <ConfirmDialog title={`Cancel the invite for ${pending.invite.email}?`} confirmLabel="Cancel invite" stepUp reason={{ label: "Reason (optional)", min: 0, max: 500, hint: "Up to 500 characters." }}
-          onConfirm={({ reason, code }) => api.post(`/admins/invites/${pending.invite.id}/cancel`, { reason: reason || null, code })}
-          onClose={() => setPending(null)} successToast="Invite cancelled" />
+          onConfirm={async ({ reason, code }) => { const out = await api.post<SyncOut>(`/admins/invites/${pending.invite.id}/cancel`, { reason: reason || null, code }); accessWarning(out, "Invite cancelled"); }}
+          onClose={() => setPending(null)} successToast="Invite cancelled">
+          <p style={{ margin: 0 }}>The link in their email stops working and their email is taken off Cloudflare Access.</p>
+        </ConfirmDialog>
       ) : null}
       {inviting && allowed ? <InviteDrawer onClose={() => setQ({ invite: null })} /> : null}
     </>
   );
 }
 
-type InviteOut = { id: string; accessReady: boolean; nextSteps: string[] };
+type InviteOut = { id: string; email: string; acceptUrl: string; accessAdded: boolean; emailSent: boolean; emailError: string | null };
+type SyncOut = { accessRemoved?: boolean; accessError?: string | null };
+
+/** The database change is done; if Cloudflare Access could not be updated, say so (the dialog shows the error). */
+function accessWarning(out: SyncOut, done: string) {
+  if (out.accessError) {
+    refreshAll();
+    throw new Error(`${done}, but ${out.accessError.charAt(0).toLowerCase()}${out.accessError.slice(1)}`);
+  }
+}
+
+/** What each role can do, shown on the invite form. */
+const ROLE_HELP: Record<Role, string> = {
+  owner: "Everything an operator can do, plus product settings and managing admins.",
+  operator: "Day-to-day work: support, notices, retries, licence checks and template drafts.",
+  viewer: "Read-only. Sees everything, changes nothing.",
+};
 
 function InviteDrawer({ onClose }: { onClose: () => void }) {
   const { me, now, withAuth, online } = useAdmin();
@@ -161,11 +179,18 @@ function InviteDrawer({ onClose }: { onClose: () => void }) {
 
   if (done) {
     return (
-      <Drawer open title="Invite created" onClose={onClose} footer={<button type="button" className="btn primary" onClick={onClose}>Done</button>}>
+      <Drawer open title="Invite sent" onClose={onClose} footer={<button type="button" className="btn primary" onClick={onClose}>Done</button>}>
         <div className="form">
-          <p style={{ margin: 0 }}>No email is sent. Tell {email.trim()} yourself, then:</p>
-          <ol className="steps">{done.nextSteps.map((s) => <li key={s}>{s}</li>)}</ol>
-          {done.accessReady ? <Alert tone="ok">This email is already on the portal&apos;s allow list.</Alert> : <Alert tone="warn" title="Not on the allow list yet">This email is not on the portal&apos;s allow list yet.</Alert>}
+          {done.emailSent
+            ? <Alert tone="ok" title={`Invite emailed to ${done.email}`}>They can now sign in through Cloudflare Access with that email.</Alert>
+            : <Alert tone="warn" title="The invite email could not be sent">{done.emailError ?? "Send them the link yourself."} The invite is open and their email is on Cloudflare Access.</Alert>}
+          <p style={{ margin: 0 }}>What they do next:</p>
+          <ol className="steps">
+            <li>Open <span className="mono">{done.acceptUrl}</span> (the link in the email).</li>
+            <li>Enter the one-time code Cloudflare Access emails them.</li>
+            <li>Create their Casevoya account (or sign in) and add an authenticator app.</li>
+            <li>Accept the invite.</li>
+          </ol>
           <dl className="dl"><div><dt>Role</dt><dd>{role}{reviewer && role !== "viewer" ? " · template reviewer" : ""}</dd></div><div><dt>Expires</dt><dd>{when(new Date((now + d * 86400) * 1000).toISOString())}</dd></div></dl>
         </div>
       </Drawer>
@@ -176,7 +201,7 @@ function InviteDrawer({ onClose }: { onClose: () => void }) {
     <Drawer open title="Invite an admin" onClose={onClose} dirty={Boolean(email || note)} footer={
       <>
         <button type="button" className="btn" onClick={onClose}>Cancel</button>
-        <button type="submit" form="invite-form" className="btn primary" disabled={!valid || busy || !online}>{busy ? "Inviting…" : "Create invite"}</button>
+        <button type="submit" form="invite-form" className="btn primary" disabled={!valid || busy || !online}>{busy ? "Sending invite…" : "Send invite"}</button>
       </>
     }>
       <form id="invite-form" className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
@@ -186,14 +211,19 @@ function InviteDrawer({ onClose }: { onClose: () => void }) {
         </Field>
         <fieldset className="fld" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Role</legend>
-          <div className="radios">{ROLES.map((r) => <label key={r}><input type="radio" name="role" checked={role === r} onChange={() => { setRole(r); if (r === "viewer") setReviewer(false); }} />{r}</label>)}</div>
+          <div className="radios role-choice">{ROLES.map((r) => (
+            <label key={r} className={role === r ? "on" : undefined}>
+              <input type="radio" name="role" value={r} checked={role === r} onChange={() => { setRole(r); if (r === "viewer") setReviewer(false); }} />
+              <span><b style={{ textTransform: "capitalize" }}>{r}</b><small style={{ display: "block", fontWeight: 400 }}>{ROLE_HELP[r]}</small></span>
+            </label>
+          ))}</div>
         </fieldset>
         <label className="check"><input type="checkbox" checked={reviewer && role !== "viewer"} disabled={role === "viewer"} onChange={(e) => setReviewer(e.target.checked)} />Template reviewer (owners and operators only; also needs a verified licence to review)</label>
         <TextArea id="i-note" label="Note (optional)" max={200} value={note} onChange={setNote} error={issues?.byField.note ?? null} rows={2} />
         <Field id="i-days" label="Expires after (days)" hint="1 to 30." error={issues?.byField.days ?? null}>
           <input id="i-days" className="inp" type="number" min={1} max={30} value={days} onChange={(e) => setDays(e.target.value)} />
         </Field>
-        <Alert tone="info">No email is sent. You tell them, add them to Cloudflare Access and ADMIN_ALLOWED_EMAILS, and they accept after signing in with an authenticator app.</Alert>
+        <Alert tone="info">We email them a link and add their email to Cloudflare Access. They create a Casevoya account if they don&apos;t have one, add an authenticator app, and accept. Cancel the invite any time to take access away.</Alert>
         {inlineCode ? <div className="codebox-wrap"><p>Your last authenticator check is older than 15 minutes.</p><CodeInput id="i-code" value={code} onChange={setCode} error={issues?.byField.code ?? null} /></div> : null}
         {error && !issues ? (error instanceof ApiFailure && ["conflict", "forbidden"].includes(error.code) ? <Alert tone="bad" title={error.message} /> : <ErrorAlert error={error} />) : null}
       </form>

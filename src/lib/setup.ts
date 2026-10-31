@@ -1,7 +1,7 @@
 import "server-only";
 import type { User } from "@supabase/supabase-js";
 import type { SetupApi, SetupFactor, SetupUser } from "./api/modules/setup";
-import { enrolTotp, setupSessionStatus, signInWithPasswordOnly, verifyTotp } from "./session";
+import { enrolTotp, setupSessionStatus, signInWithPasswordOnly, userSessionClient, verifyTotp } from "./session";
 
 /**
  * The real first-admin Setup operations (service role for the Auth admin API, the user's own session for
@@ -56,6 +56,13 @@ export const supabaseSetup: SetupApi = {
     if (error) throw new Error(`auth admin update failed: ${error.message}`);
   },
 
+  async acceptInvite(target) {
+    const { client } = await userSessionClient(target);
+    const { data, error } = await client.rpc("accept_platform_admin_invite");
+    if (error) return { ok: false, error };
+    return { ok: true, result: data as { user_id: string; role: string; template_reviewer: boolean } };
+  },
+
   signIn: (target, password) => signInWithPasswordOnly(target, password),
   session: (target) => setupSessionStatus(target),
   enrol: (target) => enrolTotp(target),
@@ -88,7 +95,7 @@ export const supabaseSetup: SetupApi = {
     const { count, error } = await caller.db
       .from("audit_log")
       .select("id", { count: "exact", head: true })
-      .in("action", ["admin_portal.setup.account", "admin_portal.setup.authenticator_verified"])
+      .in("action", ["admin_portal.setup.account", "admin_portal.setup.authenticator_verified", "admin_portal.join.account", "admin_portal.join.authenticator_verified"])
       .eq("result", "failure")
       .gte("occurred_at", sinceIso)
       .eq("context->>setup_email", caller.email)

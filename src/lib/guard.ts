@@ -37,6 +37,12 @@ export type SetupContext = AccessIdentity & {
   setup: true;
 };
 
+/**
+ * Someone with an open invite who is joining: like Setup, they may not have an auth user yet (userId null). Only the
+ * /join endpoints use it; they create the account, enrol the authenticator and accept the invite.
+ */
+export type JoinContext = SetupContext & { join: InviteeContext["invite"] };
+
 export type GateReason =
   | "config"
   | "setup_locked"
@@ -68,6 +74,8 @@ export type GateDeps = {
   /** The caller's platform_admins row, or null. */
   adminRecord?: (db: SupabaseClient, userId: string) => Promise<AdminRecord | null>;
   makeClient?: (env: AdminEnv) => SupabaseClient;
+  /** For an email not on ADMIN_ALLOWED_EMAILS: is it a platform admin or does it have an open invite? Default: the database. */
+  dynamicAllowed?: (db: SupabaseClient, env: AdminEnv, email: string) => Promise<boolean>;
   /** The API request being gated (method and path under /api/admin). When set, the per-caller rate limits apply. */
   request?: { method: string; path: string };
   limiter?: Limiter;
@@ -120,6 +128,40 @@ export async function evaluateInviteeGate(
   return { ...identity, userId, env: deps.env, db, role: null, templateReviewer: false, invite };
 }
 
+/**
+ * The dynamic part of the allow list: a platform admin, or someone with an open invite. Owners invite from the portal,
+ * which also adds the email to the Access policy; cancelling, expiry and removal take it away again.
+ */
+export async function emailIsAdminOrInvited(db: SupabaseClient, env: AdminEnv, email: string): Promise<boolean> {
+  if (await openInvite(db, email)) return true;
+  const userId = await authUserIdByEmail(env, email);
+  return userId ? Boolean(await platformAdminRow(db, userId)) : false;
+}
+
+/**
+ * The join gate (invited people creating their account): a valid Access JWT for an email with an open invite. The
+ * auth user may not exist yet. Admins and anyone without an open invite are refused.
+ */
+export async function evaluateJoinGate(
+  deps: GateDeps & { invite?: (db: SupabaseClient, email: string) => Promise<InviteeContext["invite"] | null> },
+): Promise<JoinContext> {
+  const identity = await verifyIdentity(deps);
+  await throttle(deps, identity);
+  const db = (deps.makeClient ?? serviceClient)(deps.env);
+  const invite = await (deps.invite ?? openInvite)(db, identity.email);
+  if (!invite) throw new AdminDenied("not_platform_admin", "There is no open invite for this email. Ask an owner to invite you again.");
+  let userId: string | null;
+  try {
+    userId = await (deps.lookupUser ?? authUserIdByEmail)(deps.env, identity.email);
+  } catch {
+    throw new AdminDenied("lookup_failed", "Could not look up your user record");
+  }
+  if (userId && (await (deps.adminRecord ?? platformAdminRow)(db, userId))) {
+    throw new AdminDenied("setup_locked", "You are already a platform admin. Open the portal home page.", { alreadyAdmin: true });
+  }
+  return { ...identity, userId, env: deps.env, db, role: null, templateReviewer: false, setup: true, join: invite };
+}
+
 /** How many platform admins exist, and when the first was added (service role). */
 export async function platformAdminCount(db: SupabaseClient): Promise<{ count: number; firstAt: string | null }> {
   const { data, error, count } = await db
@@ -165,13 +207,24 @@ export async function evaluateSetupGate(
 
 async function verifyIdentity(deps: GateDeps): Promise<AccessIdentity> {
   const verify = deps.verify ?? verifyAccessJwt;
+  const dynamicAllowed = deps.dynamicAllowed ?? emailIsAdminOrInvited;
+  let lookupFailed = false;
   try {
     return await verify(deps.token, {
       teamDomain: deps.env.accessTeamDomain,
       aud: deps.env.accessAud,
       allowedEmails: deps.env.allowedEmails,
+      isAllowed: async (email) => {
+        try {
+          return await dynamicAllowed((deps.makeClient ?? serviceClient)(deps.env), deps.env, email);
+        } catch {
+          lookupFailed = true;
+          return false;
+        }
+      },
     });
   } catch (error) {
+    if (lookupFailed) throw new AdminDenied("lookup_failed", "Could not check the admin allow list");
     if (error instanceof AccessDenied) throw new AdminDenied(error.reason, error.message);
     throw new AdminDenied("bad_access_jwt", "The Cloudflare Access token did not verify");
   }
@@ -215,9 +268,9 @@ export async function requireAdmin(): Promise<AdminContext> {
 
 /** For the API: the admin gate, the invitee gate (admins and people with an open invite), or the first-admin setup gate. */
 export async function requireCaller(
-  mode: "admin" | "invitee" | "setup",
+  mode: "admin" | "invitee" | "setup" | "join",
   request?: { method: string; path: string },
-): Promise<AdminContext | InviteeContext | SetupContext> {
+): Promise<AdminContext | InviteeContext | SetupContext | JoinContext> {
   let env: AdminEnv;
   try {
     env = readEnv();
@@ -226,6 +279,7 @@ export async function requireCaller(
   }
   const token = (await headers()).get(ACCESS_HEADER);
   if (mode === "setup") return evaluateSetupGate({ token, env, request });
+  if (mode === "join") return evaluateJoinGate({ token, env, request });
   return mode === "invitee" ? evaluateInviteeGate({ token, env, request }) : evaluateGate({ token, env, request });
 }
 

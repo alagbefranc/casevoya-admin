@@ -32,6 +32,7 @@ const env: AdminEnv = {
   allowedEmails: ["admin@casevoya.ca"],
   supabasePublishableKey: null,
   adminOrigin: "https://admin.casevoya.ca",
+  invites: null,
 };
 
 describe("verifyAccessJwt", () => {

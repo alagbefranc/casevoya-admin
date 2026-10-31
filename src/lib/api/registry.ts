@@ -8,6 +8,7 @@ import { noticeEndpoints } from "./modules/notices";
 import { overviewEndpoints } from "./modules/overview";
 import { sessionEndpoints } from "./modules/session";
 import { setupEndpoints } from "./modules/setup";
+import { joinEndpoints } from "./modules/join";
 import { subscriptionEndpoints } from "./modules/subscriptions";
 import { supportEndpoints } from "./modules/support";
 import { templateEndpoints } from "./modules/templates";
@@ -23,6 +24,7 @@ import { migrationEndpoints } from "./modules/migration";
 /** Every /api/admin endpoint. Static paths are listed before parameterised ones inside each module. */
 export const ENDPOINTS: Endpoint[] = [
   ...setupEndpoints,
+  ...joinEndpoints,
   ...sessionEndpoints,
   ...overviewEndpoints,
   ...firmEndpoints,
