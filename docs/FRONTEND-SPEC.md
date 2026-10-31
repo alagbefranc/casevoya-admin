@@ -777,52 +777,63 @@ release with how many firms it reached.
 
 **Layout (1440)**
 
-*Settings tab*: DataTable: Key (monospace), Description, Value (formatted: `{unit, count}` as "14
-days"; other shapes as compact JSON), Pending confirmation (amber "Unconfirmed" badge), Updated,
-Version. Rows with `editable: true` have **Change** (owners). Change opens a Drawer: current value,
-Count (number 1–3650), Unit (select from `allowed_units`), Reason (3–500), inline code field when
-step-up is stale; preview "Trial length: 14 days → 21 days".
+*Settings tab*: DataTable of the settings that are not switches: Key (monospace), Description, Value
+(the edited field formatted by kind; other shapes as compact JSON), "Unconfirmed", a Dangerous/Caution
+badge, or "Migration only", Updated, Version. Rows with a rule have **Change** (owners). Change opens a
+Drawer with an input for the rule's kind (On/Off, whole number with its range, select for an enum,
+count + unit for a duration, text with its length) and a preview "old → new". **Review change** opens
+the confirm dialog.
 
-*Switches tab*: list of `switches` (key, description, On/Off badge). Read-only with the note "Switches
-cannot be changed from the portal yet."
+*Switches tab*: settings whose value has an `enabled` boolean: key, description, On/Off, danger badge,
+**Turn on/off** (owners) → confirm dialog.
 
-*Feature flags tab*: StubPanel with `featureFlags.gap`.
+*Feature flags tab*: `feature_flags` with their default, danger badge and per-firm overrides. **Turn
+on/off** changes the default; **Firm overrides** opens a Drawer to add, change or clear one firm's
+override (firm picker + On/Off).
+
+*Recent changes* (every tab): the last 30 portal changes for that tab (when, key and firm, old → new,
+reason). The latest change of each key has **Revert** (owners): one click, no typed confirmation, a
+fresh step-up if needed.
+
+*Confirm dialog*: old value, new value, reason (3–500), inline code when the step-up is stale. A
+`critical` setting or flag (today `documents.accept_structural_inspection` and
+`documents.large_uploads_enabled`) shows a red warning and needs its key typed.
 
 *Admins tab* (owners): see 2.8.1.
 
 **Data** `GET /config` →
-`{ settings: [{ key, value, description, pending_confirmation, created_at, updated_at, version, editable, allowed_units }], switches: [{ key, enabled, description, editable: false }], featureFlags: { items: [], stub: true, gap } }`.
+`{ settings: [{ key, value, description, pending_confirmation, created_at, updated_at, version, editable, rule: { kind, field, min_value, max_value, choices, units, max_length, pattern, danger, danger_note } | null, current, allowed_units }], switches: [{ key, enabled, description, version, updated_at, editable, danger, danger_note }], featureFlags: { items: [{ key, description, enabled, danger, danger_note, version, updated_at, overrides: [{ organization_id, firm_name, enabled, updated_at }] }], perFirmOverrides: true }, changes: [{ id, target, config_key, organization_id, firm_name, old_value, new_value, reason, reverts_change_id, created_at, revertible }] }`.
 
-**Actions**
+**Actions** (all owner only **[API][DB]**, step-up **yes**, audit entry written first)
 
-| Action | Endpoint | Body | Who | Step-up |
-|---|---|---|---|---|
-| Change a setting | `PATCH /config/settings/:key` | `{ value: { unit: "days"\|"months"\|"business_days", count: 1–3650 }, reason: 3–500, code? }` | owner **[API]** (database: any platform admin at step-up **[DB]**) | **yes** |
+| Action | Endpoint | Body |
+|---|---|---|
+| Change a setting or switch | `PATCH /config/settings/:key` | `{ value, expectedVersion, reason: 3–500, confirm?, code? }` (value: boolean, number, enum text, `{unit, count}` or text by the rule) |
+| Change a flag default | `PATCH /config/flags/:key` | `{ enabled, expectedVersion, reason, confirm?, code? }` |
+| Set or clear a firm override | `POST /config/flags/:key/overrides` | `{ organizationId, enabled: true\|false\|null, reason, confirm?, code? }` |
+| Revert a change | `POST /config/changes/:id/revert` | `{ reason, code? }` |
 
-Success returns the updated row; toast "Setting saved"; refetch `/config`. Errors: `conflict` (setting
-not editable from the portal), `validation_failed` on `value.unit` ("licence.manual_check_target uses
-business_days"), `not_found`, step-up/session per 1.6.
-
-**What an admin can achieve here** See every platform setting Casevoya runs on (trial length, licence
-and source re-check intervals, upload limits, email addresses, plan allowances), change the duration
-settings with a recorded reason, and see which switches are on.
+Errors: `conflict` (migration-only setting, stale version "This changed since you loaded it", not the
+latest change), `validation_failed` on `value`, `value.count` or `confirm`, `not_found`, step-up/session
+per 1.6.
 
 **Logic and rules**
 
-- Editable = the stored value is exactly `{unit, count}` **[API]**, because the database's setting
-  function only writes that shape **[DB]**. Today that is `trial.duration`, `licence.recheck_interval`,
-  `licence.manual_check_target` and `source.recheck_interval.*`. Units: `business_days` for
-  `licence.manual_check_target`, `days`/`months` for the rest **[API]** (the database checks the first
-  three keys **[DB]**). Count 1–3650 **[API][DB]**.
-- Every other setting (switches, plans, upload limits, email addresses, Stripe prices) is read-only in
-  the portal **[NOT BUILT]**; they change through reviewed migrations.
-- Saving clears `pending_confirmation` **[DB]** (the flag marks defaults nobody has confirmed).
-- Owner-only is a portal rule **[API]**; the database allows any platform admin with a fresh step-up.
-- Side effects: new values apply at once to new work (for example, a new trial gets the new length;
-  next licence review dates use the new interval on the next check). Audit: the database records
-  `product.setting_changed` (not shown in Audit log, see 5), and the portal records
-  `admin_portal.config.setting_changed` with `{ key, reason, before, after }` (shown).
-- Feature flags (per-firm or percentage) **[NOT BUILT]**.
+- What is editable, and how, is the `product_setting_rules` table **[DB]**; the portal checks the same
+  rules first **[API]** (src/lib/config-rules.ts). Settings with no rule stay read-only: e-sign consent
+  wording, From address, inbound domain, plans, Stripe prices, virus scan retry and inbound sender
+  limits (multi-part), reminder offsets. They change through reviewed migrations.
+- The database functions (`admin_config_set_setting`, `admin_config_set_flag`,
+  `admin_config_set_flag_override`, `admin_config_revert`) are SECURITY DEFINER, run as the admin's own
+  session and require a platform owner with a fresh step-up **[DB]**. They check `expectedVersion`,
+  refuse unchanged values, require the typed key for critical items, keep `platform_config_changes`
+  and record `product.setting_changed` / `product.flag_changed` / `product.flag_override_changed` /
+  `product.config_reverted`. The portal also records `admin_portal.config.*` with `{ key, reason,
+  before, after }`.
+- There are no payment or sign-up kill switches in the schema, so none are shown.
+- The app reads settings and flags from the database on every request (no cache): a change applies on
+  the next request. The app reads a flag with `feature_flag_enabled(key)` (firm override, else default).
+- `platform.config_probe` (a switch and a flag) has no effect; use it to check a change reaches the app.
 
 #### 2.8.1 Admins (Config › Admins, owners only)
 

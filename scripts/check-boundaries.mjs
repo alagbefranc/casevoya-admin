@@ -32,6 +32,10 @@ const READABLE = new Set([
   "consultant_credentials",
   // Config page: platform settings (no firm data).
   "product_settings",
+  "product_setting_rules",
+  "feature_flags",
+  "feature_flag_overrides",
+  "platform_config_changes",
 ]);
 
 // Functions that run as the signed-in admin (their own Supabase session), never as the service role.
@@ -48,6 +52,10 @@ const USER_SESSION_RPCS = new Set([
   "platform_admin_remove",
   "accept_platform_admin_invite",
   "set_product_setting",
+  "admin_config_set_setting",
+  "admin_config_set_flag",
+  "admin_config_set_flag_override",
+  "admin_config_revert",
   // Proof of a fresh step-up before a service-role write (src/lib/api/core.ts proveStepUp).
   "platform_step_up_check",
 ]);
