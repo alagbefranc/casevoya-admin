@@ -139,6 +139,8 @@ const CASES: Case[] = [
   { method: "GET", path: "/privacy/requests", url: `/privacy/requests?state=overdue&organizationId=${ORG}`, bad: { url: "/privacy/requests?state=late" }, deny: null, calls: "platform_privacy_requests" },
   { method: "GET", path: "/privacy/breaches", url: "/privacy/breaches", bad: { url: "/privacy/breaches?limit=999" }, deny: null, calls: "" },
   { method: "GET", path: "/verification/summary", url: "/verification/summary", bad: { url: "/verification/summary" }, deny: null, calls: "platform_cicc_imports", rpcs: { platform_overview: { firms: { by_verification: { verified: 1 } }, licences: {}, verification_workload: {} }, platform_cicc_imports: { imports: [{ id: ID }] } } },
+  { method: "GET", path: "/resets", url: "/resets?state=pending", bad: { url: "/resets?state=nope" }, deny: null, calls: "platform_mfa_resets", rpcs: { platform_mfa_resets: { items: [], counts: { pending: 0, closed: 0 } } } },
+  { method: "POST", path: "/resets/:id/decide", url: `/resets/${ID}/decide`, body: { approve: false, note: "Could not confirm", code: "123456" }, bad: { url: `/resets/${ID}/decide`, body: { approve: true, confirmIdentity: false } }, deny: "viewer", calls: "platform_decide_mfa_reset", session: "fresh", rpcs: { platform_decide_mfa_reset: { id: ID, status: "denied", requester_user_id: OTHER }, ...stepUpOk } },
   { method: "GET", path: "/sample-mode", url: "/sample-mode", bad: { url: "/sample-mode?limit=abc" }, deny: null, calls: "platform_sample_overview" },
   { method: "GET", path: "/migration/jobs", url: "/migration/jobs?status=stuck", bad: { url: "/migration/jobs?status=running" }, deny: null, calls: "platform_migration_jobs" },
 ];
@@ -176,6 +178,7 @@ describe("endpoint coverage", () => {
         "PATCH /admins/:id/reviewer",
         "POST /admins/:id/remove",
         "PATCH /config/settings/:key",
+        "POST /resets/:id/decide",
       ].sort(),
     );
   });

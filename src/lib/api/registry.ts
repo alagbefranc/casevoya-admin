@@ -10,6 +10,7 @@ import { sessionEndpoints } from "./modules/session";
 import { setupEndpoints } from "./modules/setup";
 import { subscriptionEndpoints } from "./modules/subscriptions";
 import { supportEndpoints } from "./modules/support";
+import { resetEndpoints } from "./modules/resets";
 import { templateEndpoints } from "./modules/templates";
 import { usageEndpoints } from "./modules/usage";
 import { incidentEndpoints } from "./modules/incidents";
@@ -29,6 +30,7 @@ export const ENDPOINTS: Endpoint[] = [
   ...subscriptionEndpoints,
   ...licenceEndpoints,
   ...supportEndpoints,
+  ...resetEndpoints,
   ...noticeEndpoints,
   ...healthEndpoints,
   ...templateEndpoints,

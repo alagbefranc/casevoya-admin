@@ -166,6 +166,6 @@ describe("activeNav", () => {
     expect(activeNav("/firms/abc")).toBe("firms");
     expect(activeNav("/releases/templates/x")).toBe("releases");
     expect(activeNav("/config/admins")).toBe("config");
-    expect(NAV.flatMap((g) => g.items).length).toBe(14);
+    expect(NAV.flatMap((g) => g.items).length).toBe(15);
   });
 });
