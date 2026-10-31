@@ -280,41 +280,120 @@ describe("designer pages", () => {
       expect(out.gap).toMatch(/No data source yet/);
     }
   });
-  it("derives switches from settings with an enabled boolean", async () => {
-    const d = deps({ db: fakeDb({}, { product_settings: [{ key: "a.enabled", value: { enabled: true } }, { key: "trial.duration", value: { unit: "days", count: 14 } }] }) });
-    const out = (await body(await handle(req("GET", "/config"), ENDPOINTS, d))).data as { switches: { key: string }[]; featureFlags: { stub: boolean } };
-    expect(out.switches.map((s) => s.key)).toEqual(["a.enabled"]);
-    expect(out.featureFlags.stub).toBe(true);
+  const RULES = [
+    { key: "trial.duration", kind: "duration", field: null, min_value: null, max_value: null, choices: null, units: ["days", "months"], max_length: null, pattern: null, danger: "caution", danger_note: "New trials only" },
+    { key: "licence.manual_check_target", kind: "duration", field: null, units: ["business_days"], danger: "none" },
+    { key: "a.enabled", kind: "boolean", field: "enabled", danger: "critical", danger_note: "Off means no scan" },
+    { key: "email.inbound_hourly_limit", kind: "number", field: "messages", min_value: "1", max_value: "1000", danger: "none" },
+  ];
+  const tableFor = (key: string, value: unknown, version = 3) => ({
+    product_settings: [{ key, value, version }],
+    product_setting_rules: RULES.filter((r) => r.key === key),
+  });
+  it("derives switches, rules and flags with overrides", async () => {
+    const d = deps({ db: fakeDb({}, {
+      product_settings: [{ key: "a.enabled", value: { enabled: true }, version: 1 }, { key: "trial.duration", value: { unit: "days", count: 14 }, version: 2 }, { key: "subscription.plans", value: { solo: {} }, version: 1 }],
+      product_setting_rules: RULES,
+      feature_flags: [{ key: "platform.config_probe", description: "Probe", enabled: false, danger: "none", version: 1 }],
+      feature_flag_overrides: [{ flag_key: "platform.config_probe", organization_id: ORG, enabled: true }],
+      organizations: [{ id: ORG, display_name: "Test Firm" }],
+      platform_config_changes: [
+        { id: "c2", target: "setting", config_key: "a.enabled", organization_id: null, created_at: "2026-10-30T02:00:00Z" },
+        { id: "c1", target: "setting", config_key: "a.enabled", organization_id: null, created_at: "2026-10-30T01:00:00Z" },
+      ],
+    }) });
+    const out = (await body(await handle(req("GET", "/config"), ENDPOINTS, d))).data as {
+      settings: { key: string; editable: boolean; current: unknown; allowed_units: string[] }[];
+      switches: { key: string; editable: boolean; danger: string }[];
+      featureFlags: { items: { key: string; overrides: { firm_name: string; enabled: boolean }[] }[] };
+      changes: { id: string; revertible: boolean }[];
+    };
+    expect(out.switches).toMatchObject([{ key: "a.enabled", editable: true, danger: "critical" }]);
+    expect(out.settings.map((s) => [s.key, s.editable])).toEqual([["a.enabled", true], ["trial.duration", true], ["subscription.plans", false]]);
+    expect(out.settings[1]).toMatchObject({ current: { unit: "days", count: 14 }, allowed_units: ["days", "months"] });
+    expect(out.featureFlags.items[0].overrides).toMatchObject([{ firm_name: "Test Firm", enabled: true }]);
+    expect(out.changes.map((c) => [c.id, c.revertible])).toEqual([["c2", true], ["c1", false]]);
   });
   it("changes a setting as the owner's own session and audits before/after", async () => {
-    const d = deps({ session: "fresh", db: fakeDb({}, { product_settings: [{ key: "trial.duration", value: { unit: "days", count: 14 } }] }) });
-    const res = await handle(req("PATCH", "/config/settings/trial.duration", { value: { unit: "days", count: 21 }, reason: "Pilot request" }), ENDPOINTS, d);
+    const d = deps({ session: "fresh", db: fakeDb({}, tableFor("trial.duration", { unit: "days", count: 14 })), userDb: fakeDb({ admin_config_set_setting: { change_id: ID } }) });
+    const res = await handle(req("PATCH", "/config/settings/trial.duration", { value: { unit: "days", count: 21 }, expectedVersion: 3, reason: "Pilot request" }), ENDPOINTS, d);
     expect(res.status).toBe(200);
-    expect(d.userDb.calls[0]).toMatchObject({ fn: "set_product_setting", args: { p_key: "trial.duration", p_value: { unit: "days", count: 21 } } });
-    expect(outcomeAudits(d.db)[0].args).toMatchObject({ p_action: "admin_portal.config.setting_changed", p_result: "success" });
-    expect((outcomeAudits(d.db)[0].args as { p_context: Record<string, unknown> }).p_context).toMatchObject({ key: "trial.duration", before: { unit: "days", count: 14 } });
+    expect(d.userDb.calls[0]).toMatchObject({ fn: "admin_config_set_setting", args: { p_key: "trial.duration", p_value: { unit: "days", count: 21 }, p_expected_version: 3, p_reason: "Pilot request", p_confirm: null } });
+    const audit = outcomeAudits(d.db)[0].args as { p_action: string; p_context: Record<string, unknown>; p_object_id: string };
+    expect(audit).toMatchObject({ p_action: "admin_portal.config.setting_changed", p_result: "success", p_object_id: ID });
+    expect(audit.p_context).toMatchObject({ key: "trial.duration", before: { unit: "days", count: 14 }, after: { unit: "days", count: 21 } });
+  });
+  it("changes a number setting, keeping the stored field name", async () => {
+    const d = deps({ session: "fresh", db: fakeDb({}, tableFor("email.inbound_hourly_limit", { messages: 30 })), userDb: fakeDb({ admin_config_set_setting: { change_id: ID } }) });
+    const res = await handle(req("PATCH", "/config/settings/email.inbound_hourly_limit", { value: 31, expectedVersion: 3, reason: "Live check" }), ENDPOINTS, d);
+    expect(res.status).toBe(200);
+    expect((outcomeAudits(d.db)[0].args as { p_context: Record<string, unknown> }).p_context).toMatchObject({ before: { messages: 30 }, after: { messages: 31 } });
+    for (const value of [0, 1001, 2.5, "31"]) {
+      const d2 = deps({ session: "fresh", db: fakeDb({}, tableFor("email.inbound_hourly_limit", { messages: 30 })) });
+      const r2 = await handle(req("PATCH", "/config/settings/email.inbound_hourly_limit", { value, expectedVersion: 3, reason: "Live check" }), ENDPOINTS, d2);
+      expect(r2.status).toBe(422);
+      expect(d2.userDb.calls).toEqual([]);
+    }
+  });
+  it("needs the key typed for a dangerous switch", async () => {
+    const run = async (confirm?: string) => {
+      const d = deps({ session: "fresh", db: fakeDb({}, tableFor("a.enabled", { enabled: true })), userDb: fakeDb({ admin_config_set_setting: { change_id: ID } }) });
+      const res = await handle(req("PATCH", "/config/settings/a.enabled", { value: false, expectedVersion: 3, reason: "Incident", confirm }), ENDPOINTS, d);
+      return { res, d };
+    };
+    const missing = await run();
+    expect(missing.res.status).toBe(422);
+    expect(((await body(missing.res)).error as { details: { issues: { path: string }[] } }).details.issues[0].path).toBe("confirm");
+    expect(missing.d.userDb.calls).toEqual([]);
+    expect((await run("a.enable")).res.status).toBe(422);
+    const ok = await run("a.enabled");
+    expect(ok.res.status).toBe(200);
+    expect(ok.d.userDb.calls[0].args).toMatchObject({ p_value: false, p_confirm: "a.enabled" });
+  });
+  it("refuses an unchanged value", async () => {
+    const d = deps({ session: "fresh", db: fakeDb({}, tableFor("a.enabled", { enabled: true })) });
+    const res = await handle(req("PATCH", "/config/settings/a.enabled", { value: true, expectedVersion: 3, reason: "Nothing", confirm: "a.enabled" }), ENDPOINTS, d);
+    expect(res.status).toBe(422);
   });
   it("404s an unknown setting without calling the database function", async () => {
     const d = deps({ session: "fresh" });
-    const res = await handle(req("PATCH", "/config/settings/nope.key", { value: { unit: "days", count: 3 }, reason: "Try it" }), ENDPOINTS, d);
+    const res = await handle(req("PATCH", "/config/settings/nope.key", { value: { unit: "days", count: 3 }, expectedVersion: 1, reason: "Try it" }), ENDPOINTS, d);
     expect(res.status).toBe(404);
     expect(d.userDb.calls).toEqual([]);
   });
-  it("refuses settings the database cannot write, and wrong units, before calling it", async () => {
-    const d = deps({ session: "fresh", db: fakeDb({}, { product_settings: [{ key: "documents.large_uploads_enabled", value: { enabled: false } }] }) });
-    const res = await handle(req("PATCH", "/config/settings/documents.large_uploads_enabled", { value: { unit: "days", count: 3 }, reason: "Try it" }), ENDPOINTS, d);
+  it("refuses migration-only settings, and wrong units, before calling the database", async () => {
+    const d = deps({ session: "fresh", db: fakeDb({}, { product_settings: [{ key: "subscription.plans", value: { solo: {} }, version: 1 }] }) });
+    const res = await handle(req("PATCH", "/config/settings/subscription.plans", { value: { unit: "days", count: 3 }, expectedVersion: 1, reason: "Try it" }), ENDPOINTS, d);
     expect(res.status).toBe(409);
-    const d2 = deps({ session: "fresh", db: fakeDb({}, { product_settings: [{ key: "licence.manual_check_target", value: { unit: "business_days", count: 1 } }] }) });
-    const res2 = await handle(req("PATCH", "/config/settings/licence.manual_check_target", { value: { unit: "days", count: 3 }, reason: "Try it" }), ENDPOINTS, d2);
+    const d2 = deps({ session: "fresh", db: fakeDb({}, tableFor("licence.manual_check_target", { unit: "business_days", count: 1 })) });
+    const res2 = await handle(req("PATCH", "/config/settings/licence.manual_check_target", { value: { unit: "days", count: 3 }, expectedVersion: 3, reason: "Try it" }), ENDPOINTS, d2);
     expect(res2.status).toBe(422);
-    expect(((await body(res2)).error as { details: { issues: { path: string }[] } }).details.issues[0].path).toBe("value.unit");
+    expect(((await body(res2)).error as { details: { issues: { path: string }[] } }).details.issues[0].path).toBe("value.count");
     expect(d.userDb.calls).toEqual([]);
     expect(d2.userDb.calls).toEqual([]);
   });
-  it("marks only {unit, count} settings editable", async () => {
-    const d = deps({ db: fakeDb({}, { product_settings: [{ key: "a.enabled", value: { enabled: true } }, { key: "trial.duration", value: { unit: "days", count: 14 } }] }) });
-    const out = (await body(await handle(req("GET", "/config"), ENDPOINTS, d))).data as { settings: { key: string; editable: boolean; allowed_units: string[] }[] };
-    expect(out.settings.map((s) => [s.key, s.editable, s.allowed_units])).toEqual([["a.enabled", false, []], ["trial.duration", true, ["days", "months"]]]);
+  it("maps a stale version from the database to a reload conflict", async () => {
+    const d = deps({ session: "fresh", db: fakeDb({}, tableFor("trial.duration", { unit: "days", count: 14 })), userDb: fakeDb({ admin_config_set_setting: { error: { code: "PT409", message: "stale version" } } }) });
+    const res = await handle(req("PATCH", "/config/settings/trial.duration", { value: { unit: "days", count: 21 }, expectedVersion: 2, reason: "Pilot request" }), ENDPOINTS, d);
+    expect(res.status).toBe(409);
+    expect(outcomeAudits(d.db)[0].args).toMatchObject({ p_result: "failure" });
+  });
+  it("lets an operator read config but not change it", async () => {
+    const d = deps({ role: "operator", session: "fresh", db: fakeDb({}, tableFor("trial.duration", { unit: "days", count: 14 })) });
+    expect((await handle(req("GET", "/config"), ENDPOINTS, d)).status).toBe(200);
+    for (const [m, u, b] of [
+      ["PATCH", "/config/settings/trial.duration", { value: { unit: "days", count: 21 }, expectedVersion: 3, reason: "Pilot" }],
+      ["PATCH", "/config/flags/platform.config_probe", { enabled: true, expectedVersion: 1, reason: "Pilot" }],
+      ["POST", `/config/changes/${ID}/revert`, { reason: "Pilot" }],
+    ] as const) expect((await handle(req(m, u, b), ENDPOINTS, d)).status).toBe(403);
+    expect(d.userDb.calls).toEqual([]);
+  });
+  it("reverts through the owner's session with no typed confirmation", async () => {
+    const d = deps({ session: "fresh", userDb: fakeDb({ admin_config_revert: { change_id: ID, key: "a.enabled", before: { enabled: false }, after: { enabled: true } } }) });
+    const res = await handle(req("POST", `/config/changes/${ID}/revert`, { reason: "Turn scanning back on" }), ENDPOINTS, d);
+    expect(res.status).toBe(200);
+    expect(d.userDb.calls[0]).toMatchObject({ fn: "admin_config_revert", args: { p_change_id: ID, p_reason: "Turn scanning back on" } });
+    expect((outcomeAudits(d.db)[0].args as { p_context: Record<string, unknown> }).p_context).toMatchObject({ key: "a.enabled", after: { enabled: true } });
   });
   it("computes incident duration", () => {
     expect(durationMinutes({ starts_at: "2026-10-29T10:00:00Z", published_at: null, resolved_at: "2026-10-29T11:30:00Z" })).toBe(90);

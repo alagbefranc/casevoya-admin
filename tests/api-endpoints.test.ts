@@ -135,7 +135,10 @@ const CASES: Case[] = [
   { method: "GET", path: "/releases/templates", url: "/releases/templates?limit=10", bad: { url: "/releases/templates?limit=0" }, deny: null, calls: "platform_template_releases" },
   { method: "GET", path: "/releases/app-notes", url: "/releases/app-notes", bad: { url: "/releases/app-notes?offset=-1" }, deny: null, calls: "" },
   { method: "GET", path: "/config", url: "/config", bad: { url: "/config" }, deny: null, calls: "", tables: { product_settings: [{ key: "documents.large_uploads_enabled", value: { enabled: false }, description: "d", pending_confirmation: false }] } },
-  { method: "PATCH", path: "/config/settings/:key", url: "/config/settings/trial.duration", body: { value: { unit: "days", count: 21 }, reason: "Pilot firms asked for longer", code: "123456" }, bad: { url: "/config/settings/trial.duration", body: { value: "21", reason: "x" } }, deny: "operator", calls: "set_product_setting", on: "user", session: "fresh", tables: { product_settings: [{ key: "trial.duration", value: { unit: "days", count: 14 } }] } },
+  { method: "PATCH", path: "/config/settings/:key", url: "/config/settings/trial.duration", body: { value: { unit: "days", count: 21 }, expectedVersion: 2, reason: "Pilot firms asked for longer", code: "123456" }, bad: { url: "/config/settings/trial.duration", body: { value: "21", reason: "x" } }, deny: "operator", calls: "admin_config_set_setting", on: "user", session: "fresh", rpcs: { admin_config_set_setting: { change_id: ID } }, tables: { product_settings: [{ key: "trial.duration", value: { unit: "days", count: 14 }, version: 2 }], product_setting_rules: [{ key: "trial.duration", kind: "duration", field: null, units: ["days", "months"], danger: "caution" }] } },
+  { method: "PATCH", path: "/config/flags/:key", url: "/config/flags/platform.config_probe", body: { enabled: true, expectedVersion: 1, reason: "Live check", code: "123456" }, bad: { url: "/config/flags/platform.config_probe", body: { enabled: "yes", reason: "Live check" } }, deny: "operator", calls: "admin_config_set_flag", on: "user", session: "fresh", rpcs: { admin_config_set_flag: { change_id: ID } }, tables: { feature_flags: [{ key: "platform.config_probe", enabled: false, danger: "none", version: 1 }] } },
+  { method: "POST", path: "/config/flags/:key/overrides", url: "/config/flags/platform.config_probe/overrides", body: { organizationId: ORG, enabled: true, reason: "Pilot firm", code: "123456" }, bad: { url: "/config/flags/platform.config_probe/overrides", body: { organizationId: "x", enabled: true, reason: "Pilot firm" } }, deny: "operator", calls: "admin_config_set_flag_override", on: "user", session: "fresh", rpcs: { admin_config_set_flag_override: { change_id: ID, before: null } }, tables: { feature_flags: [{ key: "platform.config_probe", enabled: false, danger: "none", version: 1 }] } },
+  { method: "POST", path: "/config/changes/:id/revert", url: `/config/changes/${ID}/revert`, body: { reason: "Undo the live check", code: "123456" }, bad: { url: "/config/changes/x/revert", body: { reason: "Undo" } }, deny: "operator", calls: "admin_config_revert", on: "user", session: "fresh", rpcs: { admin_config_revert: { change_id: ID, key: "platform.config_probe", before: true, after: false } } },
   { method: "GET", path: "/privacy/requests", url: `/privacy/requests?state=overdue&organizationId=${ORG}`, bad: { url: "/privacy/requests?state=late" }, deny: null, calls: "platform_privacy_requests" },
   { method: "GET", path: "/privacy/breaches", url: "/privacy/breaches", bad: { url: "/privacy/breaches?limit=999" }, deny: null, calls: "" },
   { method: "GET", path: "/verification/summary", url: "/verification/summary", bad: { url: "/verification/summary" }, deny: null, calls: "platform_cicc_imports", rpcs: { platform_overview: { firms: { by_verification: { verified: 1 } }, licences: {}, verification_workload: {} }, platform_cicc_imports: { imports: [{ id: ID }] } } },
@@ -184,6 +187,9 @@ describe("endpoint coverage", () => {
         "POST /admins/:id/remove",
         "PATCH /config/settings/:key",
         "POST /resets/:id/decide",
+        "PATCH /config/flags/:key",
+        "POST /config/flags/:key/overrides",
+        "POST /config/changes/:id/revert",
       ].sort(),
     );
   });
