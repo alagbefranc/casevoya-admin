@@ -7,14 +7,16 @@ page, with request/response shapes, rules and workflows, is **docs/FRONTEND-SPEC
 ## Every request
 
 1. Route: unknown path `404 not_found`; known path, wrong method `405 method_not_allowed` + `Allow`.
-2. Gate: Cloudflare Access JWT (`cf-access-jwt-assertion`, re-verified), email on `ADMIN_ALLOWED_EMAILS`,
-   Supabase auth user, `platform_admins` row (or an open invite, for the session endpoints only).
+2. Gate: Cloudflare Access JWT (`cf-access-jwt-assertion`, re-verified), email on `ADMIN_ALLOWED_EMAILS` or
+   (checked live) a platform admin's or open invite's email, Supabase auth user, `platform_admins` row (or an open invite, for the session endpoints only).
    The first-admin Setup endpoints (`/setup*`) use the setup gate instead: Access + allow list + an
    **empty** `platform_admins` table (`409 conflict`, `details.locked`, once it is not); see
-   docs/BOOTSTRAP.md.
+   docs/BOOTSTRAP.md. The join endpoints (`/join*`, invited admins creating their account and accepting)
+   use the join gate: Access + an open invite for that email; the auth user may not exist yet. See
+   docs/ACCESS.md.
    Right after the Access JWT verifies (before any Auth or database lookup) the per-caller Workers rate
    limits apply (`src/lib/rate-limit.ts`, bindings in `wrangler.jsonc`): GET 120/min, other methods
-   20/min, keyed on the Access subject; `/setup*` also 10/min per Access email. Support-request creation
+   20/min, keyed on the Access subject; `/setup*` and `/join*` also 10/min per Access email. Support-request creation
    and real CICC imports also count against 5/min. Refusals answer `429 rate_limited` with
    `Retry-After: 60`. The throttle fails open when the binding is missing or errors.
 3. Mutations (POST/PATCH/PUT/DELETE): `Origin` must equal `ADMIN_ORIGIN` and `Content-Type` must be
@@ -46,7 +48,12 @@ Health `/health*` · Incidents `/incidents` + `/notices*` · Releases `/releases
 Config `/config*` (+ `/admins*` for owners) · Audit log `/audit` · Privacy `/privacy/*` ·
 Verification `/verification/summary` + `/licences/*` + `/firms/:id/verification` · Grants `/support/*` ·
 Sample mode `/sample-mode` · Migration `/migration/jobs` · plus `/session*` everywhere · Setup
-`/setup*` (first admin only).
+`/setup*` (first admin only) · Join `/join*` (invited admins).
+
+Invites: `POST /admins/invites` creates the invite, adds the email to the Access policy (only single-email
+rules; any other rule makes it refuse and cancel the invite) and emails a `/join` link
+(`{ id, email, acceptUrl, accessAdded, emailSent, emailError }`). Cancelling an invite and removing an admin
+re-sync the policy (`accessRemoved`, `accessError`).
 
 Read-only stubs (no data source yet, response carries `stub: true` and a `gap` sentence):
 `GET /releases/app-notes`, `GET /privacy/breaches`, and `featureFlags` inside `GET /config`.
@@ -64,4 +71,5 @@ The full page-by-page frontend contract is `docs/FRONTEND-SPEC.md`.
 registry (and fails if an endpoint has no case); `tests/api-core.test.ts` covers the pipeline (routing,
 gate reasons, CSRF, session/step-up, reviewer flag, audit, error mapping, CSV import, helpers);
 `tests/setup.test.ts` covers the setup gate and every `/setup*` endpoint (locked, lockout, passwords,
-factors, bootstrap call).
+factors, bootstrap call); `tests/join.test.ts` the join gate and `/join*`; `tests/access-policy.test.ts`
+the Access policy sync (never widening) and the invite email.

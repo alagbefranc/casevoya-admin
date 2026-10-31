@@ -29,7 +29,7 @@ type Enrolment = { mode: "new"; factorId: string; qrCode: string; secret: string
 const STEPS = ["account", "authenticator", "finish"] as const;
 
 
-function Card({ children, busy, label }: { children: ReactNode; busy?: boolean; label?: string }) {
+export function Card({ children, busy, label }: { children: ReactNode; busy?: boolean; label?: string }) {
   return (
     <main className="full">
       <div className="box setup" aria-busy={busy || undefined} aria-label={label}>
@@ -40,16 +40,16 @@ function Card({ children, busy, label }: { children: ReactNode; busy?: boolean; 
   );
 }
 
-function Bars({ step }: { step: (typeof STEPS)[number] | "done" }) {
+export function Bars({ step }: { step: (typeof STEPS)[number] | "done" }) {
   const at = step === "done" ? 3 : STEPS.indexOf(step);
   return (
-    <div className="bars" role="img" aria-label={step === "done" ? "Setup complete" : `Step ${at + 1} of 3`}>
+    <div className="bars" role="img" aria-label={step === "done" ? "Complete" : `Step ${at + 1} of 3`}>
       {STEPS.map((s, i) => <span key={s} className={i < at ? "done" : i === at ? "on" : undefined} />)}
     </div>
   );
 }
 
-function Checks({ items }: { items: string[] }) {
+export function Checks({ items }: { items: string[] }) {
   return (
     <ul className="checks">
       {items.map((t) => <li key={t}><CircleCheck className="ic" aria-hidden />{t}</li>)}
@@ -58,7 +58,7 @@ function Checks({ items }: { items: string[] }) {
 }
 
 /** A primary button whose spinner sits inside the flex gap, so it never overlaps the label (390 px fix). */
-function Submit({ busy, busyLabel, children, disabled, type = "submit", onClick }: { busy: boolean; busyLabel: string; children: ReactNode; disabled?: boolean; type?: "submit" | "button"; onClick?: () => void }) {
+export function Submit({ busy, busyLabel, children, disabled, type = "submit", onClick }: { busy: boolean; busyLabel: string; children: ReactNode; disabled?: boolean; type?: "submit" | "button"; onClick?: () => void }) {
   return (
     <button type={type} className="btn primary" disabled={busy || disabled} aria-busy={busy || undefined} onClick={onClick}>
       {busy ? <><Loader2 className="ic spin" aria-hidden /><span>{busyLabel}</span></> : children}
@@ -72,12 +72,12 @@ function lockedAt(error: unknown): string | null | undefined {
   return d?.locked ? (d.lockedAt ?? null) : undefined;
 }
 
-function fieldError(error: unknown, path: string): string | null {
+export function fieldError(error: unknown, path: string): string | null {
   if (!(error instanceof ApiFailure) || error.code !== "validation_failed") return null;
   return error.issues.find((i) => i.path === path)?.message ?? null;
 }
 
-function ActionError({ error }: { error: unknown }) {
+export function ActionError({ error }: { error: unknown }) {
   if (!error) return null;
   if (error instanceof ApiFailure && ["validation_failed", "rate_limited", "conflict", "forbidden", "session_required", "step_up_required"].includes(error.code)) {
     if (error.code === "validation_failed" && error.issues.length) return null; // shown on the field
@@ -246,7 +246,7 @@ function groupKey(secret: string): string {
   return secret.replace(/(.{4})/g, "$1 ").trim();
 }
 
-function AuthenticatorStep({ s, onDone, onNeedAccount }: { s: SetupState; onDone: () => void; onNeedAccount: () => void }) {
+export function AuthenticatorStep({ s, onDone, onNeedAccount, base = "/setup" }: { s: Pick<SetupState, "email">; onDone: () => void; onNeedAccount: () => void; base?: "/setup" | "/join" }) {
   const [enrolment, setEnrolment] = useState<Enrolment | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [starting, setStarting] = useState(false);
@@ -260,7 +260,7 @@ function AuthenticatorStep({ s, onDone, onNeedAccount }: { s: SetupState; onDone
     setLoadError(null);
     setError(null);
     try {
-      setEnrolment(await api.post<Enrolment>("/setup/authenticator", { restart }));
+      setEnrolment(await api.post<Enrolment>(`${base}/authenticator`, { restart }));
     } catch (err) {
       if (err instanceof ApiFailure && err.code === "session_required") return onNeedAccount();
       setLoadError(err);
@@ -286,7 +286,7 @@ function AuthenticatorStep({ s, onDone, onNeedAccount }: { s: SetupState; onDone
     setBusy(true);
     setError(null);
     try {
-      await api.post("/setup/authenticator/verify", { code });
+      await api.post(`${base}/authenticator/verify`, { code });
       onDone();
     } catch (err) {
       setCode("");

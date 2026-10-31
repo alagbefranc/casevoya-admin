@@ -443,3 +443,7 @@ pre.json { margin: 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monosp
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ic.spin { animation: none; } }
 @media (min-width: 768px) { .topbar .lbl .logo { display: none; } }
+.radios.role-choice { flex-direction: column; }
+.radios.role-choice label { align-items: flex-start; }
+.radios.role-choice label input { margin-top: 3px; }
+.radios.role-choice small { color: var(--muted, #6e6e73); font-size: 12.5px; margin-top: 2px; }

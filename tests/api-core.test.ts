@@ -200,13 +200,42 @@ describe("module rules", () => {
     expect(res.status).toBe(422);
     expect(d.userDb.calls).toEqual([]);
   });
-  it("tells the owner what to do after an invite (no email is sent)", async () => {
+  it("an invite adds the email to Access, then emails the /join link", async () => {
     const d = deps({ session: "fresh", userDb: fakeDb({ platform_admin_invite: ID }) });
     const res = await handle(req("POST", "/admins/invites", { email: "New@mail.grokbot.com", role: "operator" }), ENDPOINTS, d);
-    const out = (await body(res)).data as { accessReady: boolean; nextSteps: string[] };
-    expect(out.accessReady).toBe(false);
-    expect(out.nextSteps.join(" ")).toMatch(/ADMIN_ALLOWED_EMAILS/);
+    expect(res.status).toBe(201);
+    const out = (await body(res)).data as { accessAdded: boolean; emailSent: boolean; acceptUrl: string };
+    expect(out).toMatchObject({ accessAdded: true, emailSent: true, acceptUrl: "https://admin.casevoya.ca/join" });
+    expect(d.inviteCalls).toEqual(["sync", "mail:new@mail.grokbot.com"]);
     expect(d.userDb.calls[0].args).toMatchObject({ p_email: "new@mail.grokbot.com", p_days: 7, p_template_reviewer: false });
+  });
+  it("cancels the invite and sends no email when Access cannot be updated", async () => {
+    const d = deps({ session: "fresh", userDb: fakeDb({ platform_admin_invite: ID }), invites: { syncAccess: async () => { throw new Error("cf down"); } } });
+    const res = await handle(req("POST", "/admins/invites", { email: "new@mail.grokbot.com", role: "viewer" }), ENDPOINTS, d);
+    expect(res.status).toBe(500);
+    expect((await body(res)).error).toMatchObject({ message: expect.stringMatching(/invite was cancelled/) });
+    expect(d.userDb.calls.map((c) => c.fn)).toEqual(["platform_admin_invite", "platform_admin_cancel_invite"]);
+    expect(d.inviteCalls).toEqual(["sync"]);
+  });
+  it("keeps the invite and returns the link when the email fails", async () => {
+    const d = deps({ session: "fresh", userDb: fakeDb({ platform_admin_invite: ID }), invites: { sendMail: async () => ({ sent: false, error: "bounced" }) } });
+    const res = await handle(req("POST", "/admins/invites", { email: "new@mail.grokbot.com", role: "viewer" }), ENDPOINTS, d);
+    expect(res.status).toBe(201);
+    expect((await body(res)).data).toMatchObject({ emailSent: false, acceptUrl: "https://admin.casevoya.ca/join", emailError: expect.stringMatching(/link yourself/) });
+  });
+  it("cancelling an invite and removing an admin re-sync Access", async () => {
+    const d = deps({ session: "fresh", db: fakeDb({ platform_admin_list: { admins: [{ user_id: ID, email: "a@mail.grokbot.com" }] } }) });
+    const c = await handle(req("POST", `/admins/invites/${ID}/cancel`, {}), ENDPOINTS, d);
+    expect((await body(c)).data).toMatchObject({ status: "cancelled", accessRemoved: true });
+    const r = await handle(req("POST", `/admins/${ID}/remove`, { reason: "Left", confirmEmail: "a@mail.grokbot.com" }), ENDPOINTS, d);
+    expect((await body(r)).data).toMatchObject({ removed: true, accessRemoved: true });
+    expect(d.inviteCalls).toEqual(["sync", "sync"]);
+  });
+  it("reports (but does not fail) a cancel when Access cannot be updated", async () => {
+    const d = deps({ session: "fresh", invites: { syncAccess: async () => { throw new Error("cf down"); } } });
+    const c = await handle(req("POST", `/admins/invites/${ID}/cancel`, {}), ENDPOINTS, d);
+    expect(c.status).toBe(200);
+    expect((await body(c)).data).toMatchObject({ accessRemoved: false, accessError: expect.stringMatching(/Remove the email from the Access policy/) });
   });
   it("computes support effective status for an approved grant past its end", async () => {
     const d = deps({ db: fakeDb({ platform_support_request_history: { events: [], uses: [] } }, { support_access_requests: [{ id: ID, organization_id: ORG, status: "approved", ends_at: "2020-01-01T00:00:00Z", ended_at: null }] }) });

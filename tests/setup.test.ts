@@ -27,6 +27,10 @@ function world(over: Partial<World> = {}): World {
 
 function fakeSetup(w: World): SetupApi {
   return {
+    async acceptInvite() {
+      w.calls.push("acceptInvite");
+      return { ok: true, result: { user_id: ME, role: "operator", template_reviewer: false } };
+    },
     async getUser(_c, userId) {
       w.calls.push(`getUser:${userId}`);
       return w.user && w.user.id === userId ? w.user : null;

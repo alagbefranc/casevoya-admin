@@ -15,6 +15,20 @@ export type AdminEnv = {
   supabasePublishableKey: string | null;
   /** The portal's own origin. Mutating API calls must come from it (CSRF check). Default https://admin.casevoya.ca. */
   adminOrigin: string;
+  /**
+   * Admin invites (src/lib/access-policy.ts, src/lib/invite-mail.ts): the Cloudflare account, the Access app and
+   * its email-only allow policy, and a token scoped to Access apps/policies + Email Sending (secret CF_ADMIN_TOKEN).
+   * Null when any part is missing: invites are then refused instead of half-done.
+   */
+  invites: InviteConfig | null;
+};
+
+export type InviteConfig = {
+  accountId: string;
+  accessAppId: string;
+  accessPolicyId: string;
+  token: string;
+  mailFrom: string;
 };
 
 export class ConfigError extends Error {}
@@ -34,6 +48,7 @@ export function readEnv(source: Record<string, string | undefined> = process.env
     allowedEmails: parseEmails(get("ADMIN_ALLOWED_EMAILS")),
     supabasePublishableKey: source.SUPABASE_PUBLISHABLE_KEY?.trim() || null,
     adminOrigin: (source.ADMIN_ORIGIN?.trim() || "https://admin.casevoya.ca").replace(/\/$/, ""),
+    invites: readInviteConfig(source),
   };
   if (missing.length) throw new ConfigError(`Missing configuration: ${missing.join(", ")}`);
   if (!env.allowedEmails.length) throw new ConfigError("ADMIN_ALLOWED_EMAILS names nobody");
@@ -48,4 +63,14 @@ export function readEnv(source: Record<string, string | undefined> = process.env
 
 export function parseEmails(value: string): string[] {
   return [...new Set(value.split(",").map((email) => email.trim().toLowerCase()).filter((email) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)))];
+}
+
+export function readInviteConfig(source: Record<string, string | undefined>): InviteConfig | null {
+  const accountId = source.CF_ACCOUNT_ID?.trim() ?? "";
+  const accessAppId = source.CF_ACCESS_APP_ID?.trim() ?? "";
+  const accessPolicyId = source.CF_ACCESS_POLICY_ID?.trim() ?? "";
+  const token = source.CF_ADMIN_TOKEN?.trim() ?? "";
+  const mailFrom = source.ADMIN_MAIL_FROM?.trim() || "notices@casevoya.ca";
+  if (!/^[0-9a-f]{32}$/.test(accountId) || !/^[0-9a-f-]{36}$/.test(accessAppId) || !/^[0-9a-f-]{36}$/.test(accessPolicyId) || token.length < 20) return null;
+  return { accountId, accessAppId, accessPolicyId, token, mailFrom };
 }

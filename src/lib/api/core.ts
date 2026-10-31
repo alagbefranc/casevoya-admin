@@ -1,9 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import type { AdminContext, AdminRole, InviteeContext, SetupContext } from "../guard";
+import type { AdminContext, AdminRole, InviteeContext, JoinContext, SetupContext } from "../guard";
 import { AdminDenied } from "../guard";
 import type { SessionStatus } from "../session";
 import type { SetupApi } from "./modules/setup";
+import type { InviteOps } from "../invites";
 import { ApiError, STEP_UP_MESSAGE, auditResultFor, fromDbError, redact, zodDetails, type DbError, type ErrorCode } from "./errors";
 import { RATE_LIMITED_MESSAGE, RATE_LIMIT_RETRY_AFTER_SECONDS, callerKey, type Limiter } from "../rate-limit";
 
@@ -16,10 +17,10 @@ import { RATE_LIMITED_MESSAGE, RATE_LIMIT_RETRY_AFTER_SECONDS, callerKey, type L
  * platform_admins table, re-checked on every request (409 for good once any admin exists).
  */
 
-export type Caller = AdminContext | InviteeContext | SetupContext;
+export type Caller = AdminContext | InviteeContext | SetupContext | JoinContext;
 /** Someone whose platform_admins row or open invite the gate found (session endpoints and the pre-check). */
 export type SessionCaller = AdminContext | InviteeContext;
-export type GateMode = "admin" | "invitee" | "setup";
+export type GateMode = "admin" | "invitee" | "setup" | "join";
 
 /** The admin's own Supabase session (see src/lib/session.ts). Injected so tests need no cookies or network. */
 export type SessionApi = {
@@ -58,6 +59,8 @@ export type ApiDeps = {
   attempts?: AttemptStore;
   /** First-admin Setup operations (src/lib/setup.ts). Only the setup endpoints use it. */
   setup?: SetupApi;
+  /** Access policy sync and invite email (src/lib/invites.ts). The admins endpoints refuse to invite without it. */
+  invites?: InviteOps;
   nowSeconds?: () => number;
   requestId?: () => string;
   log?: (message: string, extra?: Record<string, unknown>) => void;
@@ -393,7 +396,9 @@ export async function handle(request: Request, endpoints: Endpoint[], deps: ApiD
 
   // 3. Role. (Setup callers are never admins: the setup gate refuses once platform_admins has a row.)
   const mode = endpoint.gate ?? "admin";
-  if ("setup" in caller ? mode !== "setup" : caller.role === null ? mode !== "invitee" : mode === "setup" || !endpoint.roles.includes(caller.role)) {
+  // Join callers (an open invite, maybe no auth user yet) come from the join gate and carry `join`.
+  const flow = "setup" in caller ? ("join" in caller ? "join" : "setup") : null;
+  if (flow ? mode !== flow : caller.role === null ? mode !== "invitee" : mode === "setup" || mode === "join" || !endpoint.roles.includes(caller.role)) {
     return fail(new ApiError("forbidden", caller.role ? `Your platform role (${caller.role}) cannot do this` : "Accept your invite first"));
   }
   if (endpoint.reviewer && !caller.templateReviewer) return fail(new ApiError("forbidden", "You are not flagged as a template reviewer"));

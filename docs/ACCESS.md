@@ -15,20 +15,37 @@ domain `orange-resonance-3cfd.cloudflareaccess.com`).
 The app verifies the Access JWT itself as well (see `src/lib/access.ts`), so removing the Access
 application would lock the portal rather than open it.
 
-## Adding the template reviewer
+## Inviting an admin (from the portal, no Cloudflare steps)
 
-When Francis names the licensed immigration person, add their email to the "Casevoya admin"
-policy's include list (keep MFA required) and to `ADMIN_ALLOWED_EMAILS` in `wrangler.jsonc`, then an
-owner invites them from the Admins page with "template reviewer" ticked (the flag is the
-`platform_admins.template_reviewer` column). See [TEMPLATES.md](TEMPLATES.md).
+1. An owner opens **Config › Admins › Invite an admin**, enters the email, picks a role (owner, operator or
+   viewer; each is described on the form), optionally ticks "template reviewer", and presses **Send invite**
+   (fresh authenticator code needed). `POST /api/admin/admins/invites`:
+   - creates the invite (`platform_admin_invite`, the owner's own session);
+   - rewrites the Access policy include list to `ADMIN_ALLOWED_EMAILS` + every platform admin + every open invite
+     (`src/lib/access-policy.ts`). Only single-email rules are ever written; if the policy holds any other rule
+     (a domain, everyone, a group) nothing changes and the invite is cancelled. If Cloudflare refuses, the invite
+     is cancelled too, so nothing is half-done;
+   - emails the person a link to `https://admin.casevoya.ca/join` from `notices@casevoya.ca` (Cloudflare Email
+     Sending). If only the email fails, the invite stays and the owner sees the link to send themselves.
+2. The person opens the link, enters the one-time PIN Access emails them, then on `/join` creates their Casevoya
+   account (or signs in to their existing, confirmed one), adds an authenticator app and accepts
+   (`/api/admin/join*`, the join gate: Access JWT + an open invite). An unconfirmed existing account is refused,
+   never taken over.
+3. Cancelling an invite or removing an admin re-syncs the policy, which takes the email off Access. An expired
+   invite stops working at once in the portal (the server checks expiry) and leaves the Access policy at the next
+   invite, cancel or removal.
 
-## Adding any new admin
+The Worker's own allow list (`verifyAccessJwt`) is `ADMIN_ALLOWED_EMAILS` plus, checked live with the service
+role, any email with an open invite or a `platform_admins` row. So no var change or redeploy is needed per admin,
+and removal or expiry revokes access by itself. `ADMIN_ALLOWED_EMAILS` stays the static base and is never removed
+from the policy.
 
-1. Access policy include list + `ADMIN_ALLOWED_EMAILS` (PR, merge, `bash scripts/deploy.sh .`).
-2. An owner invites the email from the Admins page (`POST /api/admin/admins/invites`, fresh step-up).
-   No email is sent; tell the person yourself.
-3. They sign in through Access, sign in to their Casevoya account (password + authenticator) on the
-   portal and accept the invite (`POST /api/admin/session/accept-invite`) within the invite's 1–30 days.
+Config: vars `CF_ACCOUNT_ID`, `CF_ACCESS_APP_ID`, `CF_ACCESS_POLICY_ID`, `ADMIN_MAIL_FROM` in `wrangler.jsonc`;
+secret `CF_ADMIN_TOKEN` (`bash scripts/set-worker-secret.sh CF_ADMIN_TOKEN`), an account token limited to
+"Access: Apps and Policies Write" and "Email Sending Write". Without them the portal refuses to invite.
+
+Template reviewers: invite them with "template reviewer" ticked (the `platform_admins.template_reviewer` flag).
+See [TEMPLATES.md](TEMPLATES.md).
 
 ## API requests
 

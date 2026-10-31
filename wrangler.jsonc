@@ -37,9 +37,17 @@
     "CF_ACCESS_TEAM_DOMAIN": "orange-resonance-3cfd.cloudflareaccess.com",
     // Audience tag of the Access application (public; it is inside every Access JWT).
     "CF_ACCESS_AUD": "a3f3f4c08ee4828a820661fbd1955ed9994243b6e6ec848864f1a53475207825",
-    // Every admin email must be here AND on the Access policy. Template reviewers are flagged in
-    // platform_admins.template_reviewer (set by an owner in the portal), not here.
+    // The static base of the allow list (never removed from the Access policy). Invited admins are NOT added
+    // here: the portal admits any email with an open invite or a platform_admins row, and adds/removes it on
+    // the Access policy itself (src/lib/access-policy.ts). Template reviewers are a platform_admins flag.
     "ADMIN_ALLOWED_EMAILS": "admin@casevoya.ca",
+    // Admin invites: the Access app and its email-only allow policy the portal keeps in step, and the invite
+    // email sender (Cloudflare Email Sending). The token is the secret CF_ADMIN_TOKEN (Access: Apps and
+    // Policies Write + Email Sending Write, this account only).
+    "CF_ACCOUNT_ID": "c8010438fc56280e3ea5747a123e818a",
+    "CF_ACCESS_APP_ID": "76c4d190-fcd6-498d-a63e-5e9b8a968dab",
+    "CF_ACCESS_POLICY_ID": "27c25915-8305-45a6-b642-f10a8a768baf",
+    "ADMIN_MAIL_FROM": "notices@casevoya.ca",
     // Mutating /api/admin/* calls must carry this Origin (CSRF check).
     "ADMIN_ORIGIN": "https://admin.casevoya.ca"
   },

@@ -2,6 +2,7 @@ import type { AdminEnv } from "@/lib/env";
 import type { AdminRole } from "@/lib/guard";
 import { AdminDenied } from "@/lib/guard";
 import type { ApiDeps, AttemptStore, Caller } from "@/lib/api/core";
+import type { InviteOps } from "@/lib/invites";
 import { SessionError, type SessionStatus } from "@/lib/session";
 
 export const ORIGIN = "https://admin.casevoya.ca";
@@ -18,6 +19,7 @@ export const env: AdminEnv = {
   allowedEmails: ["admin@casevoya.ca"],
   supabasePublishableKey: "sb_publishable_test",
   adminOrigin: ORIGIN,
+  invites: { accountId: "a".repeat(32), accessAppId: "76c4d190-fcd6-498d-a63e-5e9b8a968dab", accessPolicyId: "27c25915-8305-45a6-b642-f10a8a768baf", token: "test-token-not-real-0000", mailFrom: "notices@casevoya.ca" },
 };
 
 export type Call = { fn: string; args: Record<string, unknown> };
@@ -93,7 +95,11 @@ export function deps(opts: {
   status?: ApiDeps["sessions"]["status"];
   /** Passwords or codes the fake signIn / stepUp refuse (SessionError bad_credentials / bad_code). */
   reject?: string[];
+  /** Replaces the fake Access sync / invite mail. */
+  invites?: Partial<InviteOps>;
 }): ApiDeps & {
+  /** "sync" and "mail:<to>" in call order. */
+  inviteCalls: string[];
   db: FakeDb;
   userDb: FakeDb;
   sessionCalls: string[];
@@ -110,6 +116,19 @@ export function deps(opts: {
   const attemptCalls: string[] = [];
   const attemptRows: { id: string; kind: string; succeeded: boolean | null }[] = [];
   const state = sessionState(opts.session ?? "none");
+  const inviteCalls: string[] = [];
+  const invites: InviteOps = {
+    syncAccess: async (e, d) => {
+      inviteCalls.push("sync");
+      if (opts.invites?.syncAccess) return opts.invites.syncAccess(e, d);
+      return { before: ["admin@casevoya.ca"], after: ["admin@casevoya.ca"], added: [], removed: [], changed: false };
+    },
+    sendMail: async (e, m) => {
+      inviteCalls.push(`mail:${m.to}`);
+      if (opts.invites?.sendMail) return opts.invites.sendMail(e, m);
+      return { sent: true, messageId: "m-1" };
+    },
+  };
   const bad = opts.badAttempts;
   const attempts: AttemptStore = {
     reserve: async (_c, kind) => {
@@ -135,6 +154,8 @@ export function deps(opts: {
     logs,
     attemptCalls,
     attemptRows,
+    inviteCalls,
+    invites,
     ...(bad === undefined ? {} : { attempts }),
     gate: async (mode) => {
       if (opts.denied) throw opts.denied;

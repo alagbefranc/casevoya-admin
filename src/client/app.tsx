@@ -45,7 +45,8 @@ export function useAdmin(): Ctx {
 export function AdminApp({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "/";
   // First-admin Setup has its own gate and screens (src/client/setup.tsx); the admin session is not loaded there.
-  const onSetup = pathname === "/setup" || pathname.startsWith("/setup/");
+  // Invited admins joining (/join, src/client/join.tsx) likewise have their own gate and screens.
+  const onSetup = pathname === "/setup" || pathname.startsWith("/setup/") || pathname === "/join" || pathname.startsWith("/join/");
   const me = useApi<Me>(onSetup ? null : "/session", { poll: 300 });
   const [accessEnded, setAccessEnded] = useState(false);
   useEffect(() => {
@@ -415,16 +416,20 @@ function BootSkeleton({ slow, onRetry }: { slow: boolean; onRetry: () => void })
 
 /**
  * Not an admin: while no platform admin exists yet the allow-listed Access user is sent to /setup (the server
- * decides via GET /setup: 200 = open). Otherwise, or if that check fails, "No access".
+ * decides via GET /setup: 200 = open). Someone with an open invite but no account yet is sent to /join. Otherwise,
+ * or if those checks fail, "No access".
  */
 function NoAccessOrSetup({ message }: { message: string }) {
   const router = useRouter();
   const setup = useApi<{ state: string }>("/setup");
+  const join = useApi<{ state: string }>("/join");
   const open = setup.data?.state === "open";
+  const invited = join.data?.state === "open";
   useEffect(() => {
     if (open) router.replace("/setup");
-  }, [open, router]);
-  if (setup.loading || open) return <BootSkeleton slow={false} onRetry={() => void setup.reload()} />;
+    else if (invited) router.replace("/join");
+  }, [open, invited, router]);
+  if (setup.loading || join.loading || open || invited) return <BootSkeleton slow={false} onRetry={() => void setup.reload()} />;
   return <NoAccess message={message} />;
 }
 
@@ -493,6 +498,7 @@ function InviteAccept() {
         </li>
         <li><div><b>Accept the role</b></div></li>
       </ol>
+      <p className="muted-note">No authenticator app on your account yet? <Link href="/join">Set it up and accept here</Link>.</p>
       <label className="check" style={{ marginBottom: 12 }}>
         <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
         I accept the platform admin role

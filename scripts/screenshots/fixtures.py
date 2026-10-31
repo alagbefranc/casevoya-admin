@@ -296,11 +296,8 @@ ADMINS = {
         {"id": uid(1201), "user_id": uid(904), "email": "sam@example.test", "role": "operator", "removed_at": iso(days=-40), "removed_by_email": "jordan@example.test", "reason": "Left the company."},
     ],
 }
-INVITE_OK = {"id": uid(1104), "accessReady": False, "nextSteps": [
-    "Add the email to the Cloudflare Access policy for admin.casevoya.ca.",
-    "Add the email to ADMIN_ALLOWED_EMAILS in casevoya-admin/wrangler.jsonc and deploy.",
-    "Tell them to sign in to admin.casevoya.ca and accept the invite (they need a Casevoya account with an authenticator app).",
-]}
+INVITE_OK = {"id": uid(1104), "email": "daniel.r@example.test", "acceptUrl": "https://admin.casevoya.ca/join", "accessAdded": True, "emailSent": True, "emailError": None}
+INVITE_NO_MAIL = {**INVITE_OK, "emailSent": False, "emailError": "The email could not be sent. Send them the link yourself."}
 
 
 def _ev(n, mins, action, result, actor, firm_n, firm, table, obj, ctx=None, diff=None, actor_type="admin"):
@@ -400,3 +397,9 @@ def setup_state(step="account", exists=True, full_name="Francis Alagbe", verifie
 
 
 SETUP_ENROL = {"mode": "new", "factorId": uid(990), "qrCode": fake_qr_svg(), "secret": "JBSWY3DPEHPK3PXPFAKEFIXTURE", "uri": "otpauth://totp/Casevoya%20admin:admin@casevoya.ca?secret=FAKE"}
+
+
+def join_state(step="account", exists=False, verified=False, role="operator"):
+    return {"state": "open", "email": "daniel.r@example.test", "step": step, "invite": {"role": role, "templateReviewer": False, "expiresAt": iso(days=6)},
+            "account": {"exists": exists, "fullName": "Daniel Reyes" if exists else None, "confirmed": True if exists else None},
+            "authenticator": {"verified": verified, "pending": False}, "passwordMinLength": 12, "signInAvailable": True}
