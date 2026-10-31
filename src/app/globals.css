@@ -63,7 +63,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .topbar .sp { flex: 1; }
 .topbar a.ex { color: #cfcac4; font-size: 13.5px; text-decoration: none; display: flex; gap: 6px; align-items: center; min-height: 34px; }
 .topbar a.ex:hover { color: #fff; }
-.logo { width: 26px; height: 26px; border-radius: 8px; background: var(--blue); color: #fff; display: grid; place-items: center; font: 700 12px var(--body); letter-spacing: -.04em; flex: none; }
+.logo { display: block; flex: none; height: 18px; width: auto; }
+.logo-mark { display: none; height: 16px; }
+.full .brandline .logo { height: 16px; }
 .menu-btn { display: none; background: #26323f; color: #fff; border: 0; border-radius: 10px; font-weight: 600; font-size: 13px; padding: 7px 11px; gap: 6px; align-items: center; cursor: pointer; }
 .chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; border-radius: 999px; padding: 5px 11px; border: 0; white-space: nowrap; cursor: pointer; background: #2a2a2a; color: #e2dfdb; }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
@@ -292,6 +294,9 @@ pre.code, .codebox { background: var(--paper); border-radius: 12px; padding: 10p
   .frame { grid-template-columns: 64px minmax(0, 1fr); }
   .frame.expanded { grid-template-columns: 240px minmax(0, 1fr); }
   .frame:not(.expanded) .side .lbl, .frame:not(.expanded) .side .cnt, .frame:not(.expanded) .side .grp, .frame:not(.expanded) .side .brand span { display: none; }
+  .frame:not(.expanded) .side .brand { justify-content: center; padding: 4px 0 18px; }
+  .frame:not(.expanded) .side .logo-word { display: none; }
+  .frame:not(.expanded) .side .logo-mark { display: block; }
   .frame:not(.expanded) .side nav a { justify-content: center; padding: 9px 0; }
   .frame:not(.expanded) .side .grp-sep { border-top: 1px solid #222; margin: 8px 6px; }
   .g5, .g6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -437,3 +442,4 @@ pre.json { margin: 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monosp
 .ic.spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ic.spin { animation: none; } }
+@media (min-width: 768px) { .topbar .lbl .logo { display: none; } }

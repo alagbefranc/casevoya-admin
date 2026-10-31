@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { Megaphone, Plus, Siren } from "lucide-react";
+import { Megaphone, Plus, Siren } from "@/components/icons";
 import { withQuery } from "@/client/api";
 import { CanOperate } from "@/client/app";
 import { useApi, useQueryState } from "@/client/hooks";

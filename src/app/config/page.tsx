@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Settings2, ToggleLeft } from "lucide-react";
+import { Settings2, ToggleLeft } from "@/components/icons";
 import { ApiFailure, api } from "@/client/api";
 import { useAdmin } from "@/client/app";
 import { ConfigTabs } from "@/client/config-tabs";

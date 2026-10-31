@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, FolderOpen, HardDrive, Info, LayoutGrid, Users } from "lucide-react";
+import { Bot, FolderOpen, HardDrive, Info, LayoutGrid, Users } from "@/components/icons";
 import { withQuery } from "@/client/api";
 import { useApi, useQueryState } from "@/client/hooks";
 import { bytes, cents, num, usd, words } from "@/client/format";

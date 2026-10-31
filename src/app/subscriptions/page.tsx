@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowUpRight } from "lucide-react";
+import { AlertCircle, ArrowUpRight } from "@/components/icons";
 import { withQuery } from "@/client/api";
 import { useApi, useQueryState } from "@/client/hooks";
 import { day, num, words } from "@/client/format";

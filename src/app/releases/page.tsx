@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Layers, Plus, Rocket, ShieldCheck, StickyNote } from "lucide-react";
+import { Layers, Plus, Rocket, ShieldCheck, StickyNote } from "@/components/icons";
 import { withQuery } from "@/client/api";
 import { CanOperate, useAdmin } from "@/client/app";
 import { useApi, useQueryState } from "@/client/hooks";

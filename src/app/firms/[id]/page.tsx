@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { Activity, BadgeCheck, Building2, ChartColumn, CreditCard, ExternalLink, KeyRound, Megaphone, MessageSquareWarning, ScrollText, Users } from "lucide-react";
+import { Activity, BadgeCheck, Building2, ChartColumn, CreditCard, ExternalLink, KeyRound, Megaphone, MessageSquareWarning, ScrollText, Users } from "@/components/icons";
 import { CanOperate } from "@/client/app";
 import { useApi } from "@/client/hooks";
 import { cents, day, num, short, when, words } from "@/client/format";

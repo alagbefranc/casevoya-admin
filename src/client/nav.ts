@@ -1,6 +1,6 @@
 import {
   Activity, ArrowRightLeft, BadgeCheck, Building2, ChartColumn, CreditCard, FlaskConical, House, KeyRound, Rocket, ScrollText, Settings, ShieldCheck, Siren,
-} from "lucide-react";
+} from "@/components/icons";
 
 /** Sidebar groups, order and names from spec 1.5. */
 type NavItem = { key: string; href: string; label: string; icon: typeof House };

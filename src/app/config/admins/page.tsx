@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { History, Mail, UserPlus, Users } from "lucide-react";
+import { History, Mail, UserPlus, Users } from "@/components/icons";
 import { ApiFailure, api } from "@/client/api";
 import { useAdmin } from "@/client/app";
 import { ConfirmDialog } from "@/client/confirm";

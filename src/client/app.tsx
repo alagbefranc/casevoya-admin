@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, FlaskConical, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { Check, FlaskConical, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, X } from "@/components/icons";
 import { api, ApiFailure, describe } from "./api";
 import { useApi, useMinuteClock, useOnline, type Loaded } from "./hooks";
 import { chipState, navCounts, splitIssues } from "./session-rules";
@@ -10,6 +10,7 @@ import { NAV, activeNav } from "./nav";
 import { RoleContext } from "./role";
 import type { Me, Overview, SessionStatus } from "./types";
 import { when } from "./format";
+import { Logo } from "./logo";
 import { ErrorSummary, Alert, CodeInput, Dialog, ErrorAlert, Field, OfflineBanner, RequestIdNote, Skeleton, Toasts } from "@/components/ui";
 
 // ------------------------------------------------------------------ context
@@ -134,9 +135,6 @@ function Provided({ me, reloadMe, children }: { me: Me; reloadMe: () => Promise<
 
 // ------------------------------------------------------------------ shell
 
-function Logo() {
-  return <span className="logo" aria-hidden>cv</span>;
-}
 
 function NavList({ counts, active, onNavigate }: { counts: ReturnType<typeof navCounts>; active: string; onNavigate?: () => void }) {
   return (
@@ -184,7 +182,7 @@ function Shell({ overview, children }: { overview: Overview | null; children: Re
   return (
     <div className={`frame ${expanded ? "expanded" : ""}`}>
       <aside className="side" aria-label="Main navigation">
-        <Link href="/" className="brand"><Logo /><span>Casevoya admin</span></Link>
+        <Link href="/" className="brand"><Logo collapsible /><span>admin</span></Link>
         <button type="button" className="rail-toggle btn sm ghost" style={{ color: "#cfcac4", marginBottom: 6 }} aria-label={expanded ? "Collapse navigation" : "Expand navigation"} aria-expanded={expanded} onClick={() => setExpanded((x) => !x)}>
           {expanded ? <PanelLeftClose className="ic" /> : <PanelLeftOpen className="ic" />}
         </button>
@@ -210,7 +208,7 @@ function Shell({ overview, children }: { overview: Overview | null; children: Re
       </div>
       <div className="drawer-nav" id="mobile-nav" hidden={!menu} role="dialog" aria-modal="true" aria-label="Menu">
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 6px 10px" }}>
-          <Logo /><b style={{ color: "#fff", flex: 1 }}>Casevoya admin</b>
+          <Logo /><b style={{ color: "#fff", flex: 1 }}>admin</b>
           <button type="button" className="x" style={{ color: "#fff" }} aria-label="Close menu" onClick={() => setMenu(false)}><X className="ic" /></button>
         </div>
         <div className="side-in"><NavList counts={counts} active={active} onNavigate={() => setMenu(false)} /></div>
@@ -388,7 +386,7 @@ function Full({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
     <main className="full">
       <div className="box">
-        <div className="brandline"><Logo />Casevoya admin</div>
+        <div className="brandline"><Logo tone="dark" />admin</div>
         <h1>{title}</h1>
         {children}
       </div>
@@ -399,7 +397,7 @@ function Full({ title, children }: { title: ReactNode; children: ReactNode }) {
 function BootSkeleton({ slow, onRetry }: { slow: boolean; onRetry: () => void }) {
   return (
     <div className="frame">
-      <aside className="side" aria-hidden><div className="brand"><Logo /><span>Casevoya admin</span></div></aside>
+      <aside className="side" aria-hidden><div className="brand"><Logo collapsible /><span>admin</span></div></aside>
       <div className="stage">
         <div className="sheet" aria-busy="true" aria-label="Loading">
           <div className="topbar"><span className="lbl"><Logo /><span className="full-l">Platform administration</span></span></div>

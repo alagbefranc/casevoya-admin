@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, CheckCircle2, Info, Loader2, RefreshCw, X, XCircle, Ban, Inbox, WifiOff, Clock } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, Loader2, RefreshCw, X, XCircle, Ban, Inbox, WifiOff, Clock } from "@/components/icons";
 import { ApiFailure, describe } from "@/client/api";
 import { clock, when, words } from "@/client/format";
 import type { Loaded } from "@/client/hooks";

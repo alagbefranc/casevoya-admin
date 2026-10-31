@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlarmClock, AlertCircle, BadgeCheck, Building2, FileSpreadsheet, ShieldX, Upload } from "lucide-react";
+import { AlarmClock, AlertCircle, BadgeCheck, Building2, FileSpreadsheet, ShieldX, Upload } from "@/components/icons";
 import { withQuery } from "@/client/api";
 import { CanOperate } from "@/client/app";
 import { useApi, useQueryState } from "@/client/hooks";

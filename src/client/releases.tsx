@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "@/components/icons";
 import { ApiFailure, api } from "./api";
 import { useAdmin } from "./app";
 import { refreshAll } from "./hooks";

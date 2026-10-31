@@ -9,6 +9,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
 export const metadata: Metadata = {
   title: "Casevoya admin",
   robots: { index: false, follow: false },
+  icons: { icon: [{ url: "/assets/brand/favicon.svg", type: "image/svg+xml" }, { url: "/assets/brand/favicon.ico" }], apple: "/assets/brand/apple-touch-icon.png" },
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#0d0d0d" };
