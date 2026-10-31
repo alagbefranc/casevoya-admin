@@ -12,6 +12,7 @@ export type ErrorCode =
   | "not_found"
   | "method_not_allowed"
   | "conflict"
+  | "payload_too_large"
   | "upstream_error"
   | "internal"
   | "rate_limited"
@@ -36,6 +37,9 @@ export class ApiFailure extends Error {
 }
 
 export const BASE = "/api/admin";
+
+/** Shown when the API (or a throttle in front of it) answers 429. */
+export const RATE_LIMITED_TEXT = "Too many requests. Please wait a minute and try again.";
 
 /** Builds `/path?a=b` from a params object, dropping empty values. */
 export function withQuery(path: string, params: Record<string, string | number | boolean | null | undefined> = {}): string {
@@ -70,6 +74,8 @@ export async function apiRequest<T>(method: "GET" | "POST" | "PATCH", path: stri
   }
   const requestId = res.headers.get("x-request-id");
   const type = res.headers.get("content-type") ?? "";
+  // A throttle in front of the API may answer 429 without the JSON error body.
+  if (res.status === 429 && !type.includes("application/json")) throw new ApiFailure("rate_limited", RATE_LIMITED_TEXT, 429, requestId);
   if (!type.includes("application/json")) {
     throw new ApiFailure("unauthenticated", "Your Cloudflare Access sign-in ended.", res.status, requestId);
   }
@@ -80,7 +86,7 @@ export async function apiRequest<T>(method: "GET" | "POST" | "PATCH", path: stri
     throw new ApiFailure("internal", "The response could not be read.", res.status, requestId);
   }
   if (!res.ok || json.error) {
-    const e = json.error ?? { code: "internal" as ErrorCode, message: `Request failed (${res.status})` };
+    const e = json.error ?? (res.status === 429 ? { code: "rate_limited" as ErrorCode, message: RATE_LIMITED_TEXT } : { code: "internal" as ErrorCode, message: `Request failed (${res.status})` });
     throw new ApiFailure(e.code, capitalise(e.message), res.status, e.requestId ?? requestId, e.details ?? null);
   }
   return json.data as T;
@@ -96,9 +102,22 @@ export function capitalise(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
+/**
+ * Whether a rate_limited error is a longer lockout (wrong passwords or codes) whose own message says how long
+ * to wait, rather than the one-minute request throttle.
+ */
+function isLockout(error: ApiFailure): boolean {
+  const minutes = (error.details as { retryAfterMinutes?: unknown } | null)?.retryAfterMinutes;
+  return typeof minutes === "number" && minutes > 1;
+}
+
 /** Plain-language text for an error (spec 1.1 table). */
 export function describe(error: unknown): { title: string; body: string; requestId: string | null } {
   if (!(error instanceof ApiFailure)) return { title: "Something went wrong", body: String((error as Error)?.message ?? error), requestId: null };
+  if (error.code === "rate_limited" || error.status === 429) {
+    if (error.code === "rate_limited" && isLockout(error)) return { title: error.message, body: "", requestId: error.requestId };
+    return { title: "Too many requests", body: "Please wait a minute and try again.", requestId: error.requestId };
+  }
   switch (error.code) {
     case "upstream_error":
       return { title: "Casevoya's database did not answer", body: "Try again. Nothing was changed.", requestId: error.requestId };

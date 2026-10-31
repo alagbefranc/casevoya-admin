@@ -11,6 +11,7 @@ export const ERROR_STATUS = {
   not_found: 404,
   method_not_allowed: 405,
   conflict: 409,
+  payload_too_large: 413,
   rate_limited: 429,
   upstream_error: 502,
   internal: 500,

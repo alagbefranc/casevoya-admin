@@ -74,7 +74,8 @@ Audit log, Privacy, Verification, Grants, Sample mode, Migration) · 3 Session a
 | `not_found` | 404 | Unknown id or route | Page-level not-found with a link back to the list. |
 | `method_not_allowed` | 405 | Bug | Same as csrf_failed. |
 | `conflict` | 409 | State changed underneath you (already open draft, pending request exists, resolved notice, already an admin, concurrent update) | Alert with `message` + **Refresh** that reloads the record; keep form input. |
-| `rate_limited` | 429 | Too many wrong passwords or codes in Setup (5 in 15 minutes) | Show `message`; the user waits out the window (3.6). |
+| `payload_too_large` | 413 | Request body over the cap (64 KB; CICC uploads 10 MB) | Alert with `message`; keep input. |
+| `rate_limited` | 429 | Too many wrong passwords or codes (5 in 15 minutes, `details.retryAfterMinutes`), or the per-minute request throttle (`Retry-After: 60`) | Lockout: show `message`; the user waits out the window (3.6). Throttle: "Too many requests. Please wait a minute and try again." |
 | `upstream_error` | 502 | Database or Supabase failure | "Casevoya's database did not answer. Try again." + **Retry**; keep input. |
 | `internal` | 500 | Configuration or unexpected error | Same as upstream, plus the `requestId` ("Quote this reference: …"). |
 

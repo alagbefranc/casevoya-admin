@@ -67,6 +67,7 @@ export const supportEndpoints = [
     summary: "Ask a firm for time-limited support access. The firm's owners are emailed and must approve in Casevoya.",
     roles: OPERATORS,
     input: supportRequestInput,
+    sensitive: true,
     status: 201,
     audit: { action: "support.request_created", table: "public.support_access_requests" },
     async handler({ db, input, audit, admin }) {

@@ -8,6 +8,7 @@ import { CanOperate, useAdmin } from "@/client/app";
 import { refreshAll, useApi } from "@/client/hooks";
 import { dash, day, when, words } from "@/client/format";
 import { CheckRow, ManualCheckDrawer, type CredentialDetail } from "@/client/licences";
+import { isRegisterUrl } from "@/client/licence-rules";
 import { Alert, Badge, ErrorAlert, PageHeader, Panel, Section, Skeleton, SkeletonRows, Status, Timeline } from "@/components/ui";
 
 function hostOf(u: string): string {
@@ -16,6 +17,12 @@ function hostOf(u: string): string {
   } catch {
     return u;
   }
+}
+
+/** Only the public CICC register is linked; any other recorded source is shown as plain text. */
+function SourceLink({ url }: { url: string }) {
+  if (!isRegisterUrl(url)) return <span className="mono" style={{ wordBreak: "break-all" }}>{url}</span>;
+  return <a href={url.trim()} target="_blank" rel="noreferrer noopener">{hostOf(url.trim())}</a>;
 }
 
 const yn = (v: boolean | null | undefined) => (v === null || v === undefined ? dash : v ? "Yes" : "No");
@@ -75,7 +82,7 @@ export default function CredentialPage() {
                     <div><dt>Discipline</dt><dd>{flags.length ? <span className="badges">{flags.map((f) => <Badge key={String(f)} tone="bad">{f}</Badge>)}</span> : "None recorded"}</dd></div>
                     <div><dt>Method</dt><dd>{d.credential.verification_method ? words(d.credential.verification_method) : dash}</dd></div>
                     {d.credential.discipline_restriction_detail ? <div style={{ gridColumn: "1 / -1" }}><dt>Restriction</dt><dd>{d.credential.discipline_restriction_detail}</dd></div> : null}
-                    <div><dt>Source</dt><dd>{d.credential.source_url ? <a href={d.credential.source_url} target="_blank" rel="noreferrer noopener">{hostOf(d.credential.source_url)}</a> : dash}</dd></div>
+                    <div><dt>Source</dt><dd>{d.credential.source_url ? <SourceLink url={d.credential.source_url} /> : dash}</dd></div>
                     <div><dt>Declared</dt><dd>{day(d.credential.declared_at)}</dd></div>
                     <div><dt>Checked</dt><dd>{when(d.credential.checked_at)}</dd></div>
                     <div><dt>Next review</dt><dd>{d.credential.next_review_at ? day(d.credential.next_review_at) : "Now"}</dd></div>
