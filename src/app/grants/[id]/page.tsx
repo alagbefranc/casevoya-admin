@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { History, KeyRound } from "lucide-react";
+import { History, KeyRound } from "@/components/icons";
 import { api } from "@/client/api";
 import { CanOperate } from "@/client/app";
 import { ConfirmDialog } from "@/client/confirm";

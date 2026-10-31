@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { Fragment, useState } from "react";
-import { ChevronDown, ChevronRight, CircleAlert, FolderSync, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleAlert, FolderSync, RefreshCw, Trash2 } from "@/components/icons";
 import { withQuery } from "@/client/api";
 import { useFirmFilter } from "@/client/firm-filter";
 import { useApi, useQueryState } from "@/client/hooks";

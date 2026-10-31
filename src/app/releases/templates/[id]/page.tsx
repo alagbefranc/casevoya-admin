@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { CheckCircle2, FileDiff, FlaskConical, Link2, NotebookPen, Users } from "lucide-react";
+import { CheckCircle2, FileDiff, FlaskConical, Link2, NotebookPen, Users } from "@/components/icons";
 import { api } from "@/client/api";
 import { useAdmin } from "@/client/app";
 import { ConfirmDialog } from "@/client/confirm";

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, FlaskConical, LayoutGrid, TriangleAlert } from "lucide-react";
+import { CheckCircle2, FlaskConical, LayoutGrid, TriangleAlert } from "@/components/icons";
 import { withQuery } from "@/client/api";
 import { useApi, useQueryState } from "@/client/hooks";
 import { num, words } from "@/client/format";

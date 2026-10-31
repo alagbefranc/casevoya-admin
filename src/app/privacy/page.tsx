@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlarmClock, CheckCircle2, Clock, Inbox, ShieldCheck } from "lucide-react";
+import { AlarmClock, CheckCircle2, Clock, Inbox, ShieldCheck } from "@/components/icons";
 import { withQuery } from "@/client/api";
 import { useFirmFilter } from "@/client/firm-filter";
 import { useApi, useQueryState } from "@/client/hooks";

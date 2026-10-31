@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Activity, AlertOctagon, CircleX, Clock, Hourglass, Inbox, Loader, RefreshCw, RotateCcw, Server } from "lucide-react";
+import { Activity, AlertOctagon, CircleX, Clock, Hourglass, Inbox, Loader, RefreshCw, RotateCcw, Server } from "@/components/icons";
 import { api, withQuery } from "@/client/api";
 import { CanOperate, useAdmin } from "@/client/app";
 import { ConfirmDialog } from "@/client/confirm";

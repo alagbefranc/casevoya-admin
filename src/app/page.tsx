@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { Activity, BadgeCheck, Building2, Clock, CreditCard, FileText, KeyRound, MessageSquareWarning, RefreshCw, ShieldCheck, Siren, Timer } from "lucide-react";
+import { Activity, BadgeCheck, Building2, Clock, CreditCard, FileText, KeyRound, MessageSquareWarning, RefreshCw, ShieldCheck, Siren, Timer } from "@/components/icons";
 import { useAdmin } from "@/client/app";
 import { useApi } from "@/client/hooks";
 import { clock, duration, minutes, num, words, day } from "@/client/format";

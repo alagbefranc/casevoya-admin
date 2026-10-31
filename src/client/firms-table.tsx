@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback } from "react";
-import { Building2 } from "lucide-react";
+import { Building2 } from "@/components/icons";
 import { withQuery } from "@/client/api";
 import { useApi, useQueryState } from "@/client/hooks";
 import { day, num, words } from "@/client/format";

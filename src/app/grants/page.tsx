@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { KeyRound } from "lucide-react";
+import { KeyRound } from "@/components/icons";
 import { withQuery } from "@/client/api";
 import { CanOperate } from "@/client/app";
 import { Countdown, RequestAccessDrawer } from "@/client/grants";

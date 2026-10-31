@@ -2,9 +2,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowRight, CheckCircle2, CircleCheck, KeyRound, Loader2, Lock, RefreshCw } from "lucide-react";
+import { ArrowRight, CheckCircle2, CircleCheck, KeyRound, Loader2, Lock, RefreshCw } from "@/components/icons";
 import { api, ApiFailure, describe } from "./api";
 import { useApi } from "./hooks";
+import { Logo } from "./logo";
 import { Alert, CodeInput, ErrorAlert, Field, RequestIdNote, Skeleton } from "@/components/ui";
 
 /**
@@ -27,15 +28,12 @@ type Enrolment = { mode: "new"; factorId: string; qrCode: string; secret: string
 
 const STEPS = ["account", "authenticator", "finish"] as const;
 
-function Logo() {
-  return <span className="logo" aria-hidden>cv</span>;
-}
 
 function Card({ children, busy, label }: { children: ReactNode; busy?: boolean; label?: string }) {
   return (
     <main className="full">
       <div className="box setup" aria-busy={busy || undefined} aria-label={label}>
-        <div className="brandline"><Logo />Casevoya admin</div>
+        <div className="brandline"><Logo tone="dark" />admin</div>
         {children}
       </div>
     </main>

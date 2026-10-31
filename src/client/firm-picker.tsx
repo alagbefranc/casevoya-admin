@@ -1,5 +1,5 @@
 "use client";
-import { X } from "lucide-react";
+import { X } from "@/components/icons";
 import { useState } from "react";
 import { withQuery } from "./api";
 import { useApi, useDebounced } from "./hooks";

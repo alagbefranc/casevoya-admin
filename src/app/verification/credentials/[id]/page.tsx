@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { BadgeCheck, ClipboardCheck, History, ListChecks, RefreshCw } from "lucide-react";
+import { BadgeCheck, ClipboardCheck, History, ListChecks, RefreshCw } from "@/components/icons";
 import { api } from "@/client/api";
 import { CanOperate, useAdmin } from "@/client/app";
 import { refreshAll, useApi } from "@/client/hooks";
