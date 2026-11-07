@@ -36,6 +36,9 @@ const READABLE = new Set([
   "feature_flags",
   "feature_flag_overrides",
   "platform_config_changes",
+  // Find introductions. The screen calls the platform functions and does not select this table.
+  // Listed so a later reviewed select is not a boundary failure. Never select ip_hash into a page.
+  "consultant_connect_requests",
 ]);
 
 // Functions that run as the signed-in admin (their own Supabase session), never as the service role.

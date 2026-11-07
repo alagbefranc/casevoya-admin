@@ -76,6 +76,7 @@ describe("describe (error copy)", () => {
     expect(describeError(new ApiFailure("internal", "x", 500, "r2")).body).toContain("Quote this reference: r2");
     expect(describeError(new ApiFailure("csrf_failed", "x", 403, null)).title).toBe("This request was blocked");
     expect(describeError(new ApiFailure("conflict", "A draft is already open", 409, null)).title).toBe("A draft is already open");
+    expect(describeError(new ApiFailure("upstream_error", "A database function the portal needs is missing (is the main-app migration applied?)", 502, "r3")).title).toMatch(/migration/);
   });
 });
 
@@ -166,6 +167,7 @@ describe("activeNav", () => {
     expect(activeNav("/firms/abc")).toBe("firms");
     expect(activeNav("/releases/templates/x")).toBe("releases");
     expect(activeNav("/config/admins")).toBe("config");
-    expect(NAV.flatMap((g) => g.items).length).toBe(15);
+    expect(activeNav("/referrals")).toBe("referrals");
+    expect(NAV.flatMap((g) => g.items).length).toBe(16);
   });
 });
