@@ -1,5 +1,5 @@
 import {
-  Activity, ArrowRightLeft, BadgeCheck, Building2, ChartColumn, CreditCard, FlaskConical, House, KeyRound, Rocket, ScrollText, Settings, ShieldCheck, Siren,
+  Activity, ArrowRightLeft, BadgeCheck, Building2, ChartColumn, CreditCard, FlaskConical, House, Inbox, KeyRound, Rocket, ScrollText, Settings, ShieldCheck, Siren,
 } from "@/components/icons";
 
 /** Sidebar groups, order and names from spec 1.5. */
@@ -12,6 +12,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     { key: "usage", href: "/usage", label: "Usage", icon: ChartColumn },
     { key: "verification", href: "/verification", label: "Verification", icon: BadgeCheck },
     { key: "grants", href: "/grants", label: "Grants", icon: KeyRound },
+    { key: "referrals", href: "/referrals", label: "Referrals", icon: Inbox },
     { key: "resets", href: "/resets", label: "Two-step resets", icon: ShieldCheck },
   ] },
   { group: "Platform", items: [

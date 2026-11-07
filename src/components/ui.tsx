@@ -47,6 +47,8 @@ const TONES: Record<string, Tone> = {
   open: "warn", paid: "ok", uncollectible: "bad", void: "neutral",
   // privacy outcomes
   fulfilled: "ok", partly_fulfilled: "info", refused: "warn", withdrawn: "neutral",
+  // find introductions
+  New: "info", Sent: "ok",
   // reasons
   invoice_unpaid: "bad", trial_ending: "warn", cancel_scheduled: "warn",
 };

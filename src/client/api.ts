@@ -120,6 +120,9 @@ export function describe(error: unknown): { title: string; body: string; request
   }
   switch (error.code) {
     case "upstream_error":
+      if (/migration|Nothing was marked sent|could not be read/i.test(error.message)) {
+        return { title: error.message, body: "Nothing was changed.", requestId: error.requestId };
+      }
       return { title: "Casevoya's database did not answer", body: "Try again. Nothing was changed.", requestId: error.requestId };
     case "internal":
       return { title: "Casevoya's database did not answer", body: `Try again. Nothing was changed.${error.requestId ? ` Quote this reference: ${error.requestId}` : ""}`, requestId: error.requestId };

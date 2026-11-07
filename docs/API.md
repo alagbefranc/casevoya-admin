@@ -54,6 +54,10 @@ Overview `/overview*` · Firms `/firms*` · Subscriptions `/subscriptions/except
 Health `/health*` · Incidents `/incidents` + `/notices*` · Releases `/releases/*` + `/templates*` ·
 Config `/config*` (+ `/admins*` for owners) · Audit log `/audit` · Privacy `/privacy/*` ·
 Verification `/verification/summary` + `/licences/*` + `/firms/:id/verification` · Grants `/support/*` ·
+Referrals `GET /referrals` (every role; no address hash) · `GET /referrals/firms` and
+`POST /referrals/:id/send` (owner or operator, fresh step-up, `confirmSend: true`). Send calls
+`platform_send_consultant_connect` and does not email. A missing function is `PGRST202` and the portal
+says the main-app migration is not applied. ·
 Sample mode `/sample-mode` · Migration `/migration/jobs` · plus `/session*` everywhere · Setup
 `/setup*` (first admin only) · Join `/join*` (invited admins).
 
