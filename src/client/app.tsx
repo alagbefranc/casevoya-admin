@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, FlaskConical, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, X } from "@/components/icons";
+import { Check, Info, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, X } from "@/components/icons";
 import { api, ApiFailure, describe } from "./api";
 import { useApi, useMinuteClock, useOnline, type Loaded } from "./hooks";
 import { chipState, navCounts, splitIssues } from "./session-rules";
@@ -221,7 +221,7 @@ function Shell({ overview, children }: { overview: Overview | null; children: Re
 function MetaBanner({ sample }: { sample: number }) {
   return (
     <div className="banner-meta" role="note">
-      <FlaskConical className="ic" aria-hidden />
+      <Info className="ic" aria-hidden />
       <span>
         <b>Operational metadata only.</b> No client content is shown here. Client content needs a firm-approved, time-limited support grant; there is no impersonation.
         {sample > 0 ? <> Firms marked <i>(sample)</i> are demo firms.</> : null}
