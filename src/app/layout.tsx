@@ -1,10 +1,18 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Source_Sans_3 } from "next/font/google";
 import { Suspense } from "react";
 import { AdminApp } from "@/client/app";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+// Source Sans 3 is the body face: a readable UI text family, self-hosted at build time.
+// Headings stay on Erode, with Georgia behind it.
+const body = Source_Sans_3({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-body",
+  display: "swap",
+  fallback: ["system-ui", "Segoe UI", "sans-serif"],
+});
 
 export const metadata: Metadata = {
   title: "Casevoya admin",
@@ -16,7 +24,7 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={body.variable}>
       <head>
         {/* Erode headings (Casevoya type), served by Fontshare; Georgia is the fallback. */}
         <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=erode@500,600&display=swap" />

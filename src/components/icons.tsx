@@ -50,7 +50,7 @@ export const ICON_MAP = {
   FileDiff: "merge", // closest match
   FileSpreadsheet: "file", // closest match
   FileText: "file-doc",
-  FlaskConical: "sparkles", // closest match
+  FlaskConical: "task", // closest match
   FolderOpen: "folder",
   FolderSync: "reconcile", // closest match
   HardDrive: "database", // closest match

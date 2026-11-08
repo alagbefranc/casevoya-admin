@@ -23,4 +23,8 @@ describe("branded icons", () => {
     expect(execSync("grep -rl lucide-react src || true", { cwd: root }).toString().trim()).toBe("");
     expect(readFileSync(path.join(root, "package.json"), "utf8")).not.toContain("lucide-react");
   });
+  it("does not map any icon to the sparkles glyph", () => {
+    expect(Object.values(ICON_MAP)).not.toContain("sparkles");
+    expect(execSync("grep -RIl --include='*.tsx' --include='*.ts' --include='*.css' sparkles src || true", { cwd: root }).toString().trim()).toBe("");
+  });
 });
